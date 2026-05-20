@@ -78,11 +78,11 @@ export const FALLBACK_PROVIDERS: ProviderRegistryData = {
       id: 'zhipu',
       name: '智谱 AI',
       npm: '@ai-sdk/openai-compatible',
-      base_url: 'https://open.bigmodel.cn/api/paas/v4',
+      base_url: 'https://open.bigmodel.cn/api/coding/paas/v4',
       models: {
         'glm-4': { id: 'glm-4', name: 'GLM-4', max_tokens: 8192 },
         'glm-4-flash': { id: 'glm-4-flash', name: 'GLM-4 Flash', max_tokens: 8192 },
-        'glm-5': { id: 'glm-5', name: 'GLM-5', max_tokens: 8192 },
+        'glm-5.1': { id: 'glm-5.1', name: 'GLM-5.1', max_tokens: 131072 },
       },
     },
     qwen: {
