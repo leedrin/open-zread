@@ -34,6 +34,23 @@ const SCM_QUERIES: Record<string, string> = {
     (function_definition name: (identifier) @fn_name) @fn
     (class_definition name: (identifier) @class_name) @class
   `,
+  csharp: `
+    (using_directive) @import
+    (namespace_declaration name: (identifier) @ns_name) @namespace
+    (file_scoped_namespace_declaration name: (identifier) @ns_name) @namespace
+    (class_declaration name: (identifier) @class_name) @class
+    (struct_declaration name: (identifier) @struct_name) @struct
+    (interface_declaration name: (identifier) @iface_name) @iface
+    (enum_declaration name: (identifier) @enum_name) @enum
+    (record_declaration name: (identifier) @record_name) @record
+    (delegate_declaration name: (identifier) @delegate_name) @delegate
+    (method_declaration name: (identifier) @method_name) @method
+    (constructor_declaration name: (identifier) @ctor_name) @ctor
+    (property_declaration name: (identifier) @prop_name) @prop
+    (event_declaration name: (identifier) @event_name) @event
+    (indexer_declaration) @indexer
+    (operator_declaration) @operator
+  `,
 };
 
 /**
@@ -136,14 +153,17 @@ function extractWithQuery(
           imports.push(node.text);
         } else if (name === 'export') {
           exports.push(extractExportFromNode(node));
-        } else if (name === 'fn' || name === 'method') {
-          // 只提取有名字的顶层函数和方法
+        } else if (name === 'fn' || name === 'method' || name === 'ctor' || name === 'prop' || name === 'event' || name === 'indexer' || name === 'operator') {
           const fnNameNode = node.childForFieldName('name');
           const fnName = fnNameNode?.text || 'anonymous';
           functions.push({
             name: fnName,
             signature: extractFunctionSignature(node),
           });
+        } else if (name === 'class' || name === 'struct' || name === 'iface' || name === 'enum' || name === 'record' || name === 'delegate' || name === 'namespace') {
+          const declNameNode = node.childForFieldName('name');
+          const declName = declNameNode?.text || node.type;
+          exports.push(`${node.type.replace('_declaration', '')} ${declName}`);
         }
       }
     }
