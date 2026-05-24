@@ -19,13 +19,56 @@ import PageAgentPrompt from '../prompts/page-agent';
 import type { WikiPage } from '@open-zread/types';
 import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './types.js';
 
+interface QualityTargets {
+  minLines: number;
+  minDiagrams: number;
+  minDiagramTypes: number;
+  minExamples: number;
+}
+
+/**
+ * 根据页面 level 和关联文件数动态计算质量目标
+ */
+function getQualityTargets(page: WikiPage): QualityTargets {
+  const fileCount = page.associatedFiles?.length ?? 0;
+
+  // core: Advanced 或关联文件 ≥ 5
+  if (page.level === 'Advanced' || fileCount >= 5) {
+    return { minLines: 400, minDiagrams: 2, minDiagramTypes: 2, minExamples: 5 };
+  }
+
+  // simple: Beginner 且关联文件 ≤ 2
+  if (page.level === 'Beginner' && fileCount <= 2) {
+    return { minLines: 80, minDiagrams: 1, minDiagramTypes: 1, minExamples: 1 };
+  }
+
+  // standard: 其他所有情况
+  return { minLines: 200, minDiagrams: 1, minDiagramTypes: 1, minExamples: 2 };
+}
+
 /**
  * Build page-specific prompt
  */
 function buildPagePrompt(page: WikiPage): string {
   const associatedFilesList = page.associatedFiles?.map(f => `- ${f}`).join('\n') || '（无关联路径）';
 
+  const targets = getQualityTargets(page);
+
   return `${PageAgentPrompt}
+
+---
+
+## 🎯 本文档质量目标
+
+根据页面难度（\`${page.level}\`）和关联文件数自动计算：
+
+| 指标 | 最低要求 |
+|------|----------|
+| 文档行数 | ${targets.minLines}+ |
+| Mermaid 图表 | ${targets.minDiagrams} 个 |
+| 不同图表类型 | ${targets.minDiagramTypes} 种 |
+| 代码示例 | ${targets.minExamples} 个 |
+| 源文件溯源 | 每个章节 + 每个代码块 |
 
 ---
 

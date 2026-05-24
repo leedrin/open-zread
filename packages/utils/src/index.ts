@@ -37,6 +37,8 @@ export { generateSnapshotName, createVersionSnapshot } from './storage/versionin
 
 // Output
 export { generateWikiJson, loadWikiBlueprint } from './output/wiki-content.js';
+export { scanSecrets, scanWikiForSecrets } from './output/audit-docs.js';
+export type { SecretLeak } from './output/audit-docs.js';
 
 // Provider Registry
 export * from './provider-registry/types.js';
