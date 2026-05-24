@@ -11,6 +11,30 @@ const languageCache = new Map<string, Parser.Language>();
 
 let parserInitialized = false;
 
+function isCompiledExecutable(): boolean {
+  if (typeof (globalThis as Record<string, unknown>).IS_PACKAGED !== 'undefined'
+    && (globalThis as Record<string, unknown>).IS_PACKAGED === true) {
+    return true;
+  }
+  const g = globalThis as Record<string, unknown>;
+  const bun = g.Bun as Record<string, unknown> | undefined;
+  return typeof bun !== 'undefined'
+    && Array.isArray(bun?.embeddedFiles)
+    && (bun.embeddedFiles as unknown[]).length > 0;
+}
+
+function getExeDir(): string | null {
+  try {
+    const exePath = process.execPath;
+    if (exePath && typeof exePath === 'string' && exePath.length > 0) {
+      return dirname(exePath);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 function getLocalCachePath(): string {
   return join(homedir(), '.zread', 'parsers');
 }
@@ -69,8 +93,14 @@ function getTreeSitterDir(): string {
   const __filename = fileURLToPath(import.meta.url);
   const currentDir = dirname(__filename);
 
-  // 打包后：wasm 文件和 index.js 在同一目录
   if (existsSync(join(currentDir, 'tree-sitter.wasm'))) return currentDir;
+
+  if (isCompiledExecutable()) {
+    const exeDir = getExeDir();
+    if (exeDir && existsSync(join(exeDir, 'tree-sitter.wasm'))) {
+      return exeDir;
+    }
+  }
 
   let current = currentDir;
 

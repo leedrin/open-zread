@@ -188,11 +188,23 @@ export async function startWikiBrowseServer(
   projectPath: string,
 ): Promise<BrowseServerInfo> {
   const { app } = createWikiApp(projectPath);
-  const isProduction = typeof globalThis.IS_PACKAGED !== 'undefined' && globalThis.IS_PACKAGED === true;
+  const g = globalThis as Record<string, unknown>;
+  const bun = g.Bun as Record<string, unknown> | undefined;
+  const hasEmbeddedFiles = typeof bun !== 'undefined' && Array.isArray(bun?.embeddedFiles) && (bun.embeddedFiles as unknown[]).length > 0;
+  const isProduction = (typeof globalThis.IS_PACKAGED !== 'undefined' && globalThis.IS_PACKAGED === true)
+    || hasEmbeddedFiles;
 
   if (isProduction) {
-    // 生产环境：添加静态文件服务
-    const webDistPath = path.resolve(__dirname, "browse");
+    const exeDir = path.dirname(process.execPath);
+    const exeBrowse = path.join(exeDir, "browse");
+
+    let webDistPath = path.resolve(__dirname, "browse");
+    if (!existsSync(webDistPath) && existsSync(exeBrowse)) {
+      webDistPath = exeBrowse;
+    }
+    if (hasEmbeddedFiles && !existsSync(webDistPath)) {
+      webDistPath = exeBrowse;
+    }
     const isStaticFilesAvailable = existsSync(webDistPath);
 
     if (isStaticFilesAvailable) {

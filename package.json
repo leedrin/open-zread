@@ -12,7 +12,8 @@
     "typecheck": "turbo run typecheck",
     "changeset": "bunx @changesets/cli",
     "version": "bunx @changesets/cli version",
-    "release": "bunx @changesets/cli publish"
+    "release": "bunx @changesets/cli publish",
+    "build:exe": "bun run scripts/build-exe.ts"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",

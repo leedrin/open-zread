@@ -71,6 +71,11 @@ function transformLiteLLMData(raw: Record<string, unknown>): ProviderRegistryDat
     }>;
   }> = {};
 
+  // LiteLLM provider ID → 内部 provider ID 映射
+  const litellmAliasMap: Record<string, string> = {
+    zai: 'zhipu',
+  };
+
   // 预定义的 provider 信息
   const providerMeta: Record<string, { name: string; npm: string; base_url?: string }> = {
     anthropic: { name: 'Anthropic', npm: '@ai-sdk/anthropic' },
@@ -105,9 +110,12 @@ function transformLiteLLMData(raw: Record<string, unknown>): ProviderRegistryDat
 
     const fullModel = String(litellmParams['model']);
     // 解析 "provider/model" 格式
-    const [providerId, modelId] = fullModel.includes('/')
+    const [rawProviderId, modelId] = fullModel.includes('/')
       ? fullModel.split('/')
       : ['openai', fullModel];
+
+    // 将 LiteLLM provider ID 映射为内部 ID (如 zai → zhipu)
+    const providerId = litellmAliasMap[rawProviderId] || rawProviderId;
 
     // 初始化 provider
     if (!providers[providerId]) {

@@ -74,6 +74,14 @@ Once inside the geeky terminal UI:
 2. Click `Generate Documentation`.
 3. Wait a moment, and a beautifully formatted `Wiki/` Markdown folder with Mermaid architecture diagrams will be generated in your project directory!
 
+**Or download directly (no Node.js required)**:
+
+| Platform | Download |
+|----------|----------|
+| Windows x64 | [open-zread-windows-x64.exe](https://github.com/leedrin/open-zread/releases/latest/download/open-zread-windows-x64.exe) |
+| macOS ARM | [open-zread-darwin-arm64](https://github.com/leedrin/open-zread/releases/latest/download/open-zread-darwin-arm64) |
+| Linux x64 | [open-zread-linux-x64](https://github.com/leedrin/open-zread/releases/latest/download/open-zread-linux-x64) |
+
 **Preview Wiki in Browser**:
 
 ```bash

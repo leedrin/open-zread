@@ -74,6 +74,14 @@ open-zread
 2. 点击 `Generate Documentation`。
 3. 稍等片刻，你的项目目录下会自动生成一个排版精美、带 Mermaid 架构图的 `Wiki/` Markdown 文件夹！
 
+**或直接下载（无需 Node.js）**：
+
+| 平台 | 下载 |
+|------|------|
+| Windows x64 | [open-zread-windows-x64.exe](https://github.com/leedrin/open-zread/releases/latest/download/open-zread-windows-x64.exe) |
+| macOS ARM | [open-zread-darwin-arm64](https://github.com/leedrin/open-zread/releases/latest/download/open-zread-darwin-arm64) |
+| Linux x64 | [open-zread-linux-x64](https://github.com/leedrin/open-zread/releases/latest/download/open-zread-linux-x64) |
+
 **浏览器预览 Wiki**：
 
 ```bash

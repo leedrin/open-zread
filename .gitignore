@@ -6,10 +6,17 @@ node_modules/
 # Build output
 dist/
 *.tsbuildinfo
+*.bun-build
 
 # IDE
 .vscode/
 .idea/
+.cursor/
+.codex/
+
+# AI tools (user-specific)
+.claude/
+.pi/
 
 # OS
 .DS_Store
