@@ -13,4 +13,5 @@ export {
   buildDirectoryTreeOnly,
   buildCoreSignatures,
   buildModuleDetails,
+  extractPageFacts,
 } from './repo-map/index.js';

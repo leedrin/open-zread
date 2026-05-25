@@ -39,6 +39,26 @@ export { generateSnapshotName, createVersionSnapshot } from './storage/versionin
 export { generateWikiJson, loadWikiBlueprint } from './output/wiki-content.js';
 export { scanSecrets, scanWikiForSecrets } from './output/audit-docs.js';
 export type { SecretLeak } from './output/audit-docs.js';
+export {
+  analyzeDoc,
+  analyzeWiki,
+  scoreByComplexity,
+} from './output/quality-audit.js';
+export type {
+  DocMetrics,
+  DocQuality,
+  QualityLevel,
+  QualityReport,
+  MermaidIssue as AuditMermaidIssue,
+} from './output/quality-audit.js';
+
+export {
+  finalizeWiki,
+} from './output/finalize.js';
+export type {
+  FinalizeOptions,
+  FinalizeResult,
+} from './output/finalize.js';
 
 // Provider Registry
 export * from './provider-registry/types.js';

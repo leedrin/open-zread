@@ -21,6 +21,9 @@ export type { SymbolManifest, SymbolInfo } from './symbols.js'
 // Wiki types
 export type { WikiPage, WikiOutput, TechStackSummary, WikiLevel } from './wiki.js'
 
+// Facts types
+export type { PageFacts, ExportFact, FileSummary } from './facts.js'
+
 // Config types
 export type { AppConfig } from './config.js'
 

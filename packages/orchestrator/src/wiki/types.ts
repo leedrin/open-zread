@@ -4,8 +4,9 @@
  * Types for Wiki content generation system.
  */
 
-import type { WikiPage } from '@open-zread/types';
+import type { WikiPage, SymbolManifest } from '@open-zread/types';
 import type { TokenUsage } from '@open-zread/agent-sdk';
+import type { FinalizeResult, QualityReport } from '@open-zread/utils';
 
 // ==================== 进度状态（批量回调） ====================
 
@@ -65,6 +66,10 @@ export interface WikiResult {
   durationMs: number;
   /** Individual page results */
   results: PageResult[];
+  /** Finalize pipeline result (if finalize ran) */
+  finalizeResult?: FinalizeResult;
+  /** Quality audit report (if audit ran) */
+  auditReport?: QualityReport;
 }
 
 // ==================== 细粒度事件（实时回调） ====================
@@ -123,4 +128,6 @@ export interface GenerateWikiOptions {
   onEvent?: (event: ArticleEventPayload) => void;
   /** Progress callback for CLI display (batch) */
   onProgress?: (state: ProgressState) => void;
+  /** Symbol manifest for Facts-First extraction (optional) */
+  symbols?: SymbolManifest;
 }

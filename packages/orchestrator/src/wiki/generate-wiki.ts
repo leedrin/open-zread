@@ -11,12 +11,13 @@
  */
 
 import pLimit from 'p-limit';
-import { loadWikiBlueprint, logger } from '@open-zread/utils';
+import { loadWikiBlueprint, logger, finalizeWiki, getWikiDir } from '@open-zread/utils';
 import { createAgent } from '../agents/create-agent.js';
 import { FileEditTool, FileReadTool, GlobTool, GrepTool } from '@open-zread/agent-sdk';
 import { WritePageTool } from '../tools/page-tools.js';
 import PageAgentPrompt from '../prompts/page-agent';
-import type { WikiPage } from '@open-zread/types';
+import { extractPageFacts } from '@open-zread/repo-analyzer';
+import type { WikiPage, PageFacts } from '@open-zread/types';
 import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './types.js';
 
 interface QualityTargets {
@@ -49,13 +50,34 @@ function getQualityTargets(page: WikiPage): QualityTargets {
 /**
  * Build page-specific prompt
  */
-function buildPagePrompt(page: WikiPage): string {
+function buildPagePrompt(page: WikiPage, facts?: PageFacts): string {
   const associatedFilesList = page.associatedFiles?.map(f => `- ${f}`).join('\n') || '（无关联路径）';
 
   const targets = getQualityTargets(page);
 
-  return `${PageAgentPrompt}
+  const factsSection = facts && facts.exports.length > 0
+    ? `
 
+---
+
+## 🔴 Facts — 权威数据源（API 签名必须以这里为准）
+
+**导出符号** (共 ${facts.exports.length} 个):
+${facts.exports.map(e => `- \`${e.signature}\` → ${e.file}${e.line ? `#L${e.line}` : ''}`).join('\n')}
+
+**关联文件摘要**:
+${facts.fileSummaries.map(f => `- ${f.file} (${f.symbolCount} 个符号, 导出: [${f.exports.slice(0, 5).join(', ')}${f.exports.length > 5 ? '...' : ''}])`).join('\n')}
+
+## ⚠️ Facts 规则
+1. 所有 API 描述必须以上述符号列表为准
+2. 如果某个符号在 Facts 中不存在，不要添加到文档中
+3. 如果 Facts 中有某个符号但不理解，可以忽略但不要篡改其签名
+
+`
+    : '';
+
+  return `${PageAgentPrompt}
+${factsSection}
 ---
 
 ## 🎯 本文档质量目标
@@ -151,6 +173,10 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
 
       try {
 
+        const facts = options?.symbols
+          ? extractPageFacts(page, options.symbols)
+          : undefined;
+
         // 使用 createAgent，通过 onEvent 回调发射细粒度事件
         const result = await createAgent({
           tools: [
@@ -160,7 +186,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
             GrepTool,
             WritePageTool
           ],
-          prompts: buildPagePrompt(page),
+          prompts: buildPagePrompt(page, facts),
           maxTurns: 30,
           // 通过 onEvent 将 CatalogEvent 转换为 ArticleEventPayload
           onEvent: (catalogEvent) => {
@@ -272,6 +298,38 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
   // 6. Wait for all tasks
   await Promise.all(tasks);
 
+  // 7. Finalize: sanitize links, build index, generate sidebar, audit
+  let finalizeData: { finalizeResult?: import('@open-zread/utils').FinalizeResult; auditReport?: import('@open-zread/utils').QualityReport } = {};
+  try {
+    const wikiDir = getWikiDir();
+    const finalizeResult = await finalizeWiki(wikiDir, {
+      pages,
+      audit: true,
+    });
+
+    logger.info(`收尾完成: ${finalizeResult.linksSanitized} 链接修复, 索引=${finalizeResult.docIndexBuilt}, 侧边栏=${finalizeResult.sidebarGenerated}`);
+
+    if (finalizeResult.auditReport) {
+      const { auditReport } = finalizeResult;
+      logger.info(
+        `质量审计: ${auditReport.professionalCount}/${auditReport.totalDocs} professional, ${auditReport.standardCount} standard, ${auditReport.basicCount} basic`
+      );
+    }
+
+    if (finalizeResult.errors.length > 0) {
+      for (const { step, error } of finalizeResult.errors) {
+        logger.warn(`收尾步骤 [${step}] 失败: ${error}`);
+      }
+    }
+
+    finalizeData = {
+      finalizeResult,
+      auditReport: finalizeResult.auditReport,
+    };
+  } catch (err) {
+    logger.warn(`收尾管道异常: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   const durationMs = Math.round(performance.now() - startTime);
 
   logger.info(
@@ -284,5 +342,6 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
     failed: progress.failed,
     durationMs,
     results: progress.results,
+    ...finalizeData,
   };
 }

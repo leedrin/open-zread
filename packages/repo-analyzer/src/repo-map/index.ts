@@ -259,5 +259,6 @@ export function buildModuleDetails(
 export { REPO_MAP_CONFIG } from './constants.js';
 export { validateMermaidBlocks } from './mermaid-validator.js';
 export type { MermaidIssue } from './mermaid-validator.js';
+export { extractPageFacts } from './module-facts.js';
 
 // Internal exports for use within repo-map module only (not exported to public API)

@@ -117,6 +117,18 @@ flowchart TD
 >
 > Sources: [agent.ts](packages/core/src/agent/agent.ts#L1-L50), [package.json](packages/core/package.json)
 
+🔴 **代码块溯源（强制）**
+任何从源文件摘抄的代码块，必须在 \`\`\` 上方添加溯源行：
+
+[Source: foo.ts](/packages/core/src/foo.ts#L42-L67)
+\`\`\`typescript
+const result = foo.bar();
+\`\`\`
+
+⚠️ 溯源行必须在代码块**外面**（纯文本，链接可点击），不要在代码块内部用注释！
+❌ 错误：\`\`\`typescript\n// Source: foo.ts\n...
+✅ 正确：[Source: foo.ts](/...)\n\`\`\`typescript\n...
+
 ---
 
 ## 自适应源码导航 (Adaptive Codebase Map)
