@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { WikiProvider } from '@/context/WikiContext';
 import { useWiki } from '@/hooks/useWiki';
 import { MainLayout } from '@/layouts/MainLayout';
-import { HomePage, WikiPage } from '@/pages';
+import { HomePage, WikiPage, GraphPage } from '@/pages';
 import '@/index.css';
 
 function AppRoutes() {
@@ -18,6 +18,7 @@ function AppRoutes() {
     <Routes>
       <Route element={<MainLayout />}>
         <Route path="/" element={<HomePage />} />
+        <Route path="/graph" element={<GraphPage />} />
         <Route path="/:slug" element={<WikiPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

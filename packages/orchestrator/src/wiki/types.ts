@@ -4,7 +4,7 @@
  * Types for Wiki content generation system.
  */
 
-import type { WikiPage, SymbolManifest } from '@open-zread/types';
+import type { WikiPage, SymbolManifest, IncrementalPlan } from '@open-zread/types';
 import type { TokenUsage } from '@open-zread/agent-sdk';
 import type { FinalizeResult, QualityReport } from '@open-zread/utils';
 
@@ -130,4 +130,6 @@ export interface GenerateWikiOptions {
   onProgress?: (state: ProgressState) => void;
   /** Symbol manifest for Facts-First extraction (optional) */
   symbols?: SymbolManifest;
+  /** Incremental update plan (if provided, only affected docs are regenerated) */
+  incrementalPlan?: IncrementalPlan;
 }

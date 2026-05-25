@@ -1,7 +1,7 @@
 // apps/browse/src/components/WikiSidebar.tsx
 import { useNavigate } from 'react-router';
 import { useWiki } from '@/hooks/useWiki';
-import { BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
+import { BookOpen, ChevronDown, ChevronRight, Network } from 'lucide-react';
 import type { TreeNode, WikiPage } from '@/types/wiki';
 
 interface TreeItemProps {
@@ -128,6 +128,17 @@ export function WikiSidebar() {
         >
           <ChevronLeft size={18} />
         </button>
+      </div>
+
+      {/* Navigation */}
+      <div className="px-4 py-2 border-b border-gray-100">
+        <a
+          href="/graph"
+          className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1.5"
+        >
+          <Network size={12} />
+          Relationship Graph
+        </a>
       </div>
 
       {/* Tree */}

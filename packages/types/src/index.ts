@@ -24,6 +24,17 @@ export type { WikiPage, WikiOutput, TechStackSummary, WikiLevel } from './wiki.j
 // Facts types
 export type { PageFacts, ExportFact, FileSummary } from './facts.js'
 
+// Incremental pipeline types
+export type {
+  DependencyEdge,
+  DependencyGraph,
+  AffectedDoc,
+  IncrementalPlan,
+  GraphNode,
+  GraphEdge,
+  GraphData,
+} from './incremental.js'
+
 // Config types
 export type { AppConfig } from './config.js'
 

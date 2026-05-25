@@ -29,6 +29,12 @@ export {
   needsReprocess,
   loadCachedSymbols,
   saveCachedSymbols,
+  buildDependencyGraph,
+  computeTransitiveImpact,
+  saveDependencyGraph,
+  loadDependencyGraph,
+  buildDocToDocDeps,
+  buildIncrementalPlan,
 } from './cache/index.js';
 
 // Storage
@@ -59,6 +65,9 @@ export type {
   FinalizeOptions,
   FinalizeResult,
 } from './output/finalize.js';
+
+// Graph visualization
+export { buildGraphData } from './output/graph-data.js';
 
 // Provider Registry
 export * from './provider-registry/types.js';

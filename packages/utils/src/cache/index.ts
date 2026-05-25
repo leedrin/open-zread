@@ -72,3 +72,16 @@ export function needsReprocess(
 
 // Symbol cache
 export { saveCachedSymbols, loadCachedSymbols } from './symbol-cache.js';
+
+// Dependency graph & incremental pipeline
+export {
+  buildDependencyGraph,
+  computeTransitiveImpact,
+  saveDependencyGraph,
+  loadDependencyGraph,
+} from './dependency-graph.js';
+
+export {
+  buildDocToDocDeps,
+  buildIncrementalPlan,
+} from './incremental-pipeline.js';

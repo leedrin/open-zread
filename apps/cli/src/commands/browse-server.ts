@@ -8,6 +8,7 @@ import open from "open";
 import path from "path";
 import { existsSync, readFileSync } from "fs";
 import type { Server } from "http";
+import { buildDependencyGraph, buildGraphData } from "@open-zread/utils";
 
 // 打包时通过 tsup define 注入的全局常量
 declare global {
@@ -30,6 +31,8 @@ interface WikiCatalog {
   language: string;
   pages: WikiPage[];
 }
+
+import type { WikiPage as TypedWikiPage } from '@open-zread/types';
 
 /** Browse 服务器信息 */
 export interface BrowseServerInfo {
@@ -175,6 +178,46 @@ function createWikiApp(projectPath: string) {
     } catch (error) {
       res.status(500).json({
         error: "Failed to load source snippet",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // 4. Get graph data for visualization
+  app.get("/api/wiki/graph", (_req: Request, res: Response) => {
+    try {
+      if (!existsSync(wikiJsonPath)) {
+        return res.json({ nodes: [], edges: [] });
+      }
+
+      const catalog: WikiCatalog = JSON.parse(
+        readFileSync(wikiJsonPath, "utf-8"),
+      );
+
+      const depGraphCachePath = path.join(
+        projectPath, ".open-zread", "cache", "dependency-graph.json"
+      );
+
+      let depGraph;
+      if (existsSync(depGraphCachePath)) {
+        depGraph = JSON.parse(readFileSync(depGraphCachePath, "utf-8"));
+      } else {
+        const symbolsPath = path.join(
+          projectPath, ".open-zread", "cache", "last_symbols.json"
+        );
+        if (existsSync(symbolsPath)) {
+          const symbols = JSON.parse(readFileSync(symbolsPath, "utf-8"));
+          depGraph = buildDependencyGraph(symbols);
+        } else {
+          return res.json({ nodes: [], edges: [] });
+        }
+      }
+
+      const graphData = buildGraphData(wikiPath, depGraph, catalog.pages as unknown as TypedWikiPage[]);
+      res.json(graphData);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to build graph data",
         message: error instanceof Error ? error.message : String(error),
       });
     }

@@ -11,14 +11,16 @@
  */
 
 import pLimit from 'p-limit';
-import { loadWikiBlueprint, logger, finalizeWiki, getWikiDir } from '@open-zread/utils';
+import { loadWikiBlueprint, logger, finalizeWiki, getWikiDir, readTextFile } from '@open-zread/utils';
 import { createAgent } from '../agents/create-agent.js';
 import { FileEditTool, FileReadTool, GlobTool, GrepTool } from '@open-zread/agent-sdk';
-import { WritePageTool } from '../tools/page-tools.js';
+import { WritePageTool, ReadPageTool } from '../tools/page-tools.js';
 import PageAgentPrompt from '../prompts/page-agent';
+import { buildSurgicalEditPrompt } from '../prompts/surgical-edit.js';
 import { extractPageFacts } from '@open-zread/repo-analyzer';
-import type { WikiPage, PageFacts } from '@open-zread/types';
+import type { WikiPage, PageFacts, AffectedDoc } from '@open-zread/types';
 import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './types.js';
+import { resolve } from 'path';
 
 interface QualityTargets {
   minLines: number;
@@ -136,7 +138,15 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
 
   // Load blueprint or use provided pages
   let pages: WikiPage[];
-  if (options?.pages && options.pages.length > 0) {
+  let affectedDocsMap: Map<string, AffectedDoc> | undefined;
+
+  if (options?.incrementalPlan && options.incrementalPlan.affectedDocs.length > 0) {
+    pages = options.incrementalPlan.affectedDocs.map(d => d.page);
+    affectedDocsMap = new Map(
+      options.incrementalPlan.affectedDocs.map(d => [d.page.slug, d])
+    );
+    logger.info(`增量模式：${pages.length} 个受影响页面（共 ${options.incrementalPlan.unaffectedDocs.length} 个未受影响）`);
+  } else if (options?.pages && options.pages.length > 0) {
     pages = options.pages;
   } else {
     const blueprint = await loadWikiBlueprint(options?.blueprintPath);
@@ -177,17 +187,38 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           ? extractPageFacts(page, options.symbols)
           : undefined;
 
-        // 使用 createAgent，通过 onEvent 回调发射细粒度事件
+        const affected = affectedDocsMap?.get(page.slug);
+        const isIncremental = affected?.updateStrength === 'incremental';
+        const triggeredBy = affected?.triggeredBy ?? [];
+
+        let prompts: string;
+        let agentTools: Array<typeof FileReadTool>;
+
+        if (isIncremental) {
+          const wikiDir = getWikiDir();
+          const existingPath = resolve(wikiDir, page.section, page.file);
+          let existingContent = '';
+          try {
+            existingContent = await readTextFile(existingPath);
+          } catch {
+            existingContent = '(文档不存在，将全量生成)';
+          }
+
+          prompts = buildSurgicalEditPrompt({
+            page,
+            triggeredBy,
+            existingContent,
+          });
+          agentTools = [FileReadTool, FileEditTool, GlobTool, GrepTool, ReadPageTool, WritePageTool];
+        } else {
+          prompts = buildPagePrompt(page, facts);
+          agentTools = [FileReadTool, FileEditTool, GlobTool, GrepTool, WritePageTool];
+        }
+
         const result = await createAgent({
-          tools: [
-            FileReadTool,
-            FileEditTool,
-            GlobTool,
-            GrepTool,
-            WritePageTool
-          ],
-          prompts: buildPagePrompt(page, facts),
-          maxTurns: 30,
+          tools: agentTools,
+          prompts,
+          maxTurns: isIncremental ? 15 : 30,
           // 通过 onEvent 将 CatalogEvent 转换为 ArticleEventPayload
           onEvent: (catalogEvent) => {
             // 将 CatalogEvent 转换为 ArticleEventPayload

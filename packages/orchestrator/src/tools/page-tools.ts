@@ -11,7 +11,7 @@
 import { resolve, dirname } from 'path';
 import { defineTool, getRequiredString, getString } from '@open-zread/agent-sdk';
 import type { ToolInputParams, ToolContext } from '@open-zread/agent-sdk';
-import { ensureDir, writeTextFile } from '@open-zread/utils';
+import { ensureDir, writeTextFile, readTextFile } from '@open-zread/utils';
 
 /**
  * Write Page Tool
@@ -104,6 +104,65 @@ export const WritePageTool = defineTool({
       return JSON.stringify({
         success: false,
         error: message,
+      });
+    }
+  },
+});
+
+export const ReadPageTool = defineTool({
+  name: 'read_page',
+  description: '读取现有 Wiki 页面的 Markdown 内容。用于增量修补时查看当前文档。',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      slug: {
+        type: 'string',
+        description: '页面 slug',
+      },
+      file: {
+        type: 'string',
+        description: '文件名，如 "1-project-overview.md"',
+      },
+      section: {
+        type: 'string',
+        description: '所属章节',
+      },
+    },
+    required: ['slug'],
+  },
+  isReadOnly: true,
+  isConcurrencySafe: true,
+  async call(input: ToolInputParams, context: ToolContext): Promise<string> {
+    const slug = getRequiredString(input, 'slug');
+    const file = getString(input, 'file');
+    const section = getString(input, 'section');
+
+    let filePath: string;
+    if (file) {
+      if (file.includes('/') || file.includes('\\')) {
+        filePath = resolve(context.cwd, '.open-zread/wiki', file);
+      } else if (section) {
+        filePath = resolve(context.cwd, '.open-zread/wiki', section, file);
+      } else {
+        filePath = resolve(context.cwd, '.open-zread/wiki', file);
+      }
+    } else {
+      filePath = resolve(context.cwd, '.open-zread/wiki', `${slug}.md`);
+    }
+
+    try {
+      const content = await readTextFile(filePath);
+      return JSON.stringify({
+        success: true,
+        slug,
+        content,
+        path: filePath,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return JSON.stringify({
+        success: false,
+        error: `页面未找到: ${message}`,
       });
     }
   },
