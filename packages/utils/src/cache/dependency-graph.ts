@@ -1,7 +1,8 @@
 import { join, dirname, normalize } from 'path';
 import type { SymbolManifest, DependencyGraph, DependencyEdge } from '@open-zread/types';
-import { getCacheDir, readJsonFile, writeJsonFile, ensureDir } from '../file-io.js';
+import { getCacheDir, readJsonFile, writeJsonFile, ensureDir, getProjectRoot } from '../file-io.js';
 import { CACHE_FILES } from './constants.js';
+import { buildResolutionContext, resolveImport } from './resolvers/index.js';
 
 function extractImportPath(importStatement: string): string | null {
   const match = importStatement.match(/from\s+['"]([^'"]+)['"]/);
@@ -43,17 +44,44 @@ export function buildDependencyGraph(
   const reverse: Record<string, string[]> = {};
   const edges: DependencyEdge[] = [];
 
+  const filePaths = symbols.symbols.map((s) => s.file);
+  const projectRoot = getProjectRoot();
+  let ctx: ReturnType<typeof buildResolutionContext> | undefined;
+  try {
+    ctx = buildResolutionContext(projectRoot, filePaths);
+  } catch {
+    // If context building fails, fall through to regex
+  }
+
   for (const symbol of symbols.symbols) {
     if (!forward[symbol.file]) forward[symbol.file] = [];
     if (!reverse[symbol.file]) reverse[symbol.file] = [];
 
+    const hasStructured = symbol.structuredImports && symbol.structuredImports.length > 0;
+    if (hasStructured && ctx) {
+      const language = symbol.language || 'unknown';
+      for (const imp of symbol.structuredImports as NonNullable<typeof symbol.structuredImports>) {
+        const resolvedPaths = resolveImport(imp, symbol.file, language, ctx);
+        for (const resolved of resolvedPaths) {
+          if (!forward[symbol.file].includes(resolved)) {
+            forward[symbol.file].push(resolved);
+          }
+          if (!reverse[resolved]) reverse[resolved] = [];
+          if (!reverse[resolved].includes(symbol.file)) {
+            reverse[resolved].push(symbol.file);
+          }
+          edges.push({ source: symbol.file, target: resolved, kind: 'import' });
+        }
+      }
+    }
+
+    const processedTargets = new Set(hasStructured && ctx ? forward[symbol.file] : []);
     for (const imp of symbol.imports) {
       const importPath = extractImportPath(imp);
       if (!importPath) continue;
-
       const resolved = resolveImportPath(importPath, symbol.file, packageAliases);
       if (!resolved) continue;
-
+      if (processedTargets.has(resolved)) continue;
       if (!forward[symbol.file].includes(resolved)) {
         forward[symbol.file].push(resolved);
       }
@@ -61,7 +89,6 @@ export function buildDependencyGraph(
       if (!reverse[resolved].includes(symbol.file)) {
         reverse[resolved].push(symbol.file);
       }
-
       edges.push({ source: symbol.file, target: resolved, kind: 'import' });
     }
   }

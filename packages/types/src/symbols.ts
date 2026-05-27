@@ -5,6 +5,16 @@
  */
 
 /**
+ * Structured import information extracted from AST.
+ * Language-specific extractors produce this instead of raw text.
+ */
+export interface ImportInfo {
+  source: string;
+  specifiers: string[];
+  lineNumber?: number;
+}
+
+/**
  * SymbolManifest - Parser output
  */
 export interface SymbolManifest {
@@ -14,6 +24,8 @@ export interface SymbolManifest {
     functions: Array<{ name: string; signature: string }>;
     imports: string[];
     docstrings: string[];
+    structuredImports?: ImportInfo[];
+    language?: string;
   }>;
   loadedParsers: string[];
 }
@@ -27,4 +39,6 @@ export interface SymbolInfo {
   functions: Array<{ name: string; signature: string }>;
   imports: string[];
   docstrings: string[];
+  structuredImports?: ImportInfo[];
+  language?: string;
 }

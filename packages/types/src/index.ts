@@ -16,7 +16,7 @@
 export type { FileManifest, FileInfo } from './manifest.js'
 
 // Symbol types
-export type { SymbolManifest, SymbolInfo } from './symbols.js'
+export type { SymbolManifest, SymbolInfo, ImportInfo } from './symbols.js'
 
 // Wiki types
 export type { WikiPage, WikiOutput, TechStackSummary, WikiLevel } from './wiki.js'

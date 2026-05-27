@@ -25,14 +25,23 @@ export function countReferences(symbols: SymbolManifest): Record<string, number>
 
   // Count references using indexed lookup
   for (const symbol of symbols.symbols) {
-    for (const importStatement of symbol.imports) {
-      const importPath = extractImportPath(importStatement);
-      if (importPath?.startsWith('.')) {
-        // Relative import: extract filename and lookup in index
-        const importName = importPath.split('/').pop() || '';
+    if (symbol.structuredImports && symbol.structuredImports.length > 0) {
+      for (const imp of symbol.structuredImports) {
+        const importName = imp.source.split('/').pop() || '';
         const targetFile = fileIndex.get(importName);
         if (targetFile) {
           referenceMap[targetFile]++;
+        }
+      }
+    } else {
+      for (const importStatement of symbol.imports) {
+        const importPath = extractImportPath(importStatement);
+        if (importPath?.startsWith('.')) {
+          const importName = importPath.split('/').pop() || '';
+          const targetFile = fileIndex.get(importName);
+          if (targetFile) {
+            referenceMap[targetFile]++;
+          }
         }
       }
     }

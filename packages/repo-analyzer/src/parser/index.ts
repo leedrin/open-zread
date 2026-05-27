@@ -1,10 +1,12 @@
 import Parser from 'web-tree-sitter';
 import { join } from 'path';
-import type { FileManifest, SymbolManifest, SymbolInfo } from '@open-zread/types';
+import type { FileManifest, SymbolManifest, SymbolInfo, ImportInfo } from '@open-zread/types';
 import { logger, getProjectRoot, readTextFile } from '@open-zread/utils';
 import { isLanguageSupported } from './language-map';
 import { loadParsers } from './wasm-loader';
-import { parseVueSfc } from './vue-handler';
+import { parseVueSfc, extractVueScript } from './vue-handler';
+import { getExtractorForLanguage } from './extractors/index.js';
+import type { TreeSitterNode } from './extractors/types.js';
 
 const SCM_QUERIES: Record<string, string> = {
   typescript: `
@@ -220,17 +222,38 @@ async function parseFile(
     const tsParser = parsers.get('typescript') || parsers.get('tsx');
 
     const vueResult = await parseVueSfc(source, vueParser, tsParser);
+
+    const tsExtractor = getExtractorForLanguage('typescript');
+    let structuredImports: ImportInfo[] | undefined;
+    if (tsExtractor) {
+      const scriptInfo = extractVueScript(source);
+      if (scriptInfo) {
+        const scriptParser = tsParser || vueParser;
+        const scriptTree = scriptParser.parse(scriptInfo.scriptContent);
+        const extracted = tsExtractor.extractStructure(scriptTree.rootNode as unknown as TreeSitterNode).imports;
+        if (extracted.length > 0) structuredImports = extracted;
+        scriptTree.delete();
+      }
+    }
+
     return {
       file: filePath,
       exports: vueResult.exports,
       functions: [],
       imports: vueResult.imports,
       docstrings: [],
+      ...(structuredImports ? { structuredImports } : {}),
+      language,
     };
   }
 
   const tree = parser.parse(source);
   const { imports, exports, functions } = extractWithQuery(tree, language, parser);
+
+  const extractor = getExtractorForLanguage(language);
+  const structuredImports = extractor
+    ? extractor.extractStructure(tree.rootNode as unknown as TreeSitterNode).imports
+    : undefined;
 
   tree.delete();
 
@@ -240,6 +263,8 @@ async function parseFile(
     functions,
     imports,
     docstrings: [],
+    ...(structuredImports && structuredImports.length > 0 ? { structuredImports } : {}),
+    language,
   };
 }
 
