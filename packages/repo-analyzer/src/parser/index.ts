@@ -7,6 +7,7 @@ import { loadParsers } from './wasm-loader';
 import { parseVueSfc, extractVueScript } from './vue-handler';
 import { getExtractorForLanguage } from './extractors/index.js';
 import type { TreeSitterNode } from './extractors/types.js';
+import { getDocExtractorForLanguage } from './doc-extractor.js';
 
 const SCM_QUERIES: Record<string, string> = {
   typescript: `
@@ -130,11 +131,12 @@ function extractExportFromNode(node: Parser.SyntaxNode): string {
 function extractWithQuery(
   tree: Parser.Tree,
   language: string,
-  parser: Parser
-): { imports: string[]; exports: string[]; functions: Array<{ name: string; signature: string }> } {
+  parser: Parser,
+  source: string
+): { imports: string[]; exports: string[]; functions: Array<{ name: string; signature: string; doc?: string }> } {
   const queryStr = SCM_QUERIES[language];
   if (!queryStr) {
-    return extractBasic(tree);
+    return extractBasic(tree, source);
   }
 
   try {
@@ -144,7 +146,9 @@ function extractWithQuery(
 
     const imports: string[] = [];
     const exports: string[] = [];
-    const functions: Array<{ name: string; signature: string }> = [];
+    const functions: Array<{ name: string; signature: string; doc?: string }> = [];
+
+    const docExtractor = getDocExtractorForLanguage(language);
 
     for (const match of matches) {
       for (const capture of match.captures) {
@@ -158,9 +162,11 @@ function extractWithQuery(
         } else if (name === 'fn' || name === 'method' || name === 'ctor' || name === 'prop' || name === 'event' || name === 'indexer' || name === 'operator') {
           const fnNameNode = node.childForFieldName('name');
           const fnName = fnNameNode?.text || 'anonymous';
+          const doc = docExtractor?.extractDocForNode(node as unknown as TreeSitterNode, source);
           functions.push({
             name: fnName,
             signature: extractFunctionSignature(node),
+            ...(doc ? { doc } : {}),
           });
         } else if (name === 'class' || name === 'struct' || name === 'iface' || name === 'enum' || name === 'record' || name === 'delegate' || name === 'namespace') {
           const declNameNode = node.childForFieldName('name');
@@ -173,14 +179,16 @@ function extractWithQuery(
     return { imports, exports, functions };
   } catch {
     logger.warn(`SCM Query failed, fallback to basic traversal: ${language}`);
-    return extractBasic(tree);
+    return extractBasic(tree, source);
   }
 }
 
-function extractBasic(tree: Parser.Tree): { imports: string[]; exports: string[]; functions: Array<{ name: string; signature: string }> } {
+function extractBasic(tree: Parser.Tree, source: string, language?: string): { imports: string[]; exports: string[]; functions: Array<{ name: string; signature: string; doc?: string }> } {
   const imports: string[] = [];
   const exports: string[] = [];
-  const functions: Array<{ name: string; signature: string }> = [];
+  const functions: Array<{ name: string; signature: string; doc?: string }> = [];
+
+  const docExtractor = language ? getDocExtractorForLanguage(language) : undefined;
 
   for (const child of tree.rootNode.children) {
     if (child.type === 'import_statement' || child.type === 'import_declaration') {
@@ -192,9 +200,11 @@ function extractBasic(tree: Parser.Tree): { imports: string[]; exports: string[]
     if (child.type === 'function_declaration') {
       const nameNode = child.childForFieldName('name');
       if (nameNode) {
+        const doc = docExtractor?.extractDocForNode(child as unknown as TreeSitterNode, source);
         functions.push({
           name: nameNode.text,
           signature: extractFunctionSignature(child),
+          ...(doc ? { doc } : {}),
         });
       }
     }
@@ -248,7 +258,7 @@ async function parseFile(
   }
 
   const tree = parser.parse(source);
-  const { imports, exports, functions } = extractWithQuery(tree, language, parser);
+  const { imports, exports, functions } = extractWithQuery(tree, language, parser, source);
 
   const extractor = getExtractorForLanguage(language);
   const structuredImports = extractor

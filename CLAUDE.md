@@ -36,6 +36,7 @@ bun run lint:fix   # ESLint 自动修复（可选，lint 有错误时使用）
 ```bash
 bun run build --filter=@open-zread/cli       # 只构建 CLI 包
 bun run dev --filter=@open-zread/orchestrator # 只开发特定包
+bun run build:exe --target=bun-windows-x64   # 打包exe
 ```
 
 ---

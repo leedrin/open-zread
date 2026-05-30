@@ -8,6 +8,9 @@ export type TreeSitterNode = {
   children: TreeSitterNode[];
   child(index: number): TreeSitterNode | null;
   childForFieldName(name: string): TreeSitterNode | null;
+  previousSibling: TreeSitterNode | null;
+  previousNamedSibling: TreeSitterNode | null;
+  nextSibling: TreeSitterNode | null;
   startPosition: { row: number; column: number };
   endPosition: { row: number; column: number };
 };

@@ -21,6 +21,7 @@ export function extractPageFacts(page: WikiPage, symbols: SymbolManifest): PageF
           kind: 'function',
           signature: fn.signature,
           file: sym.file,
+          ...(fn.doc ? { doc: fn.doc } : {}),
         });
       }
     }

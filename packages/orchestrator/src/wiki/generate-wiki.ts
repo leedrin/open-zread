@@ -49,6 +49,12 @@ function getQualityTargets(page: WikiPage): QualityTargets {
   return { minLines: 200, minDiagrams: 1, minDiagramTypes: 1, minExamples: 2 };
 }
 
+function formatDoc(doc: string): string {
+  const lines = doc.split('\n');
+  if (lines.length <= 1) return doc;
+  return lines.join('\n              ');
+}
+
 /**
  * Build page-specific prompt
  */
@@ -65,7 +71,11 @@ function buildPagePrompt(page: WikiPage, facts?: PageFacts): string {
 ## 🔴 Facts — 权威数据源（API 签名必须以这里为准）
 
 **导出符号** (共 ${facts.exports.length} 个):
-${facts.exports.map(e => `- \`${e.signature}\` → ${e.file}${e.line ? `#L${e.line}` : ''}`).join('\n')}
+${facts.exports.map(e => {
+    const base = `- \`${e.signature}\` → ${e.file}${e.line ? `#L${e.line}` : ''}`;
+    if (e.doc) return base + `\n  📝 作者注释：${formatDoc(e.doc)}`;
+    return base;
+  }).join('\n')}
 
 **关联文件摘要**:
 ${facts.fileSummaries.map(f => `- ${f.file} (${f.symbolCount} 个符号, 导出: [${f.exports.slice(0, 5).join(', ')}${f.exports.length > 5 ? '...' : ''}])`).join('\n')}
@@ -74,6 +84,7 @@ ${facts.fileSummaries.map(f => `- ${f.file} (${f.symbolCount} 个符号, 导出:
 1. 所有 API 描述必须以上述符号列表为准
 2. 如果某个符号在 Facts 中不存在，不要添加到文档中
 3. 如果 Facts 中有某个符号但不理解，可以忽略但不要篡改其签名
+4. 描述 API 用途时，**优先**使用作者注释中的措辞和角度，避免重新发挥
 
 `
     : '';

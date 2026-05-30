@@ -4,6 +4,7 @@ export interface ExportFact {
   signature: string;
   file: string;
   line?: number;
+  doc?: string;
 }
 
 export interface FileSummary {

@@ -21,7 +21,7 @@ export interface SymbolManifest {
   symbols: Array<{
     file: string;
     exports: string[];
-    functions: Array<{ name: string; signature: string }>;
+    functions: Array<{ name: string; signature: string; doc?: string }>;
     imports: string[];
     docstrings: string[];
     structuredImports?: ImportInfo[];
@@ -36,7 +36,7 @@ export interface SymbolManifest {
 export interface SymbolInfo {
   file: string;
   exports: string[];
-  functions: Array<{ name: string; signature: string }>;
+  functions: Array<{ name: string; signature: string; doc?: string }>;
   imports: string[];
   docstrings: string[];
   structuredImports?: ImportInfo[];
