@@ -101,6 +101,7 @@ function buildDocIndex(outputDir: string): void {
 }
 
 export function generateSidebar(outputDir: string, pages: WikiPage[]): void {
+  const active = pages.filter((p) => p.status !== 'tombstone');
   const SECTION_ORDER: Record<string, number> = {
     '入门指南': -1,
     '上手教程': 0,
@@ -110,7 +111,7 @@ export function generateSidebar(outputDir: string, pages: WikiPage[]): void {
 
   const sections = new Map<string, Map<string, WikiPage[]>>();
 
-  for (const page of pages) {
+  for (const page of active) {
     if (!sections.has(page.section)) {
       sections.set(page.section, new Map());
     }
