@@ -26,7 +26,31 @@ lint clean, utils 34/34, orchestrator 42/42.
   `deriveId(slug-Date.now()-len)`. Intended: human-added pages are new identities distinct
   from migrated AI pages with the same slug. No action needed.
 
-### Deferred scope (follow-on plans, not built)
-- Phase A-UI: TUI catalog editor (plan-ready Tasks 10–12). No React-hook test infra; manual verify.
+## Phase A-UI (TUI catalog editor) — built 2026-05-31
+
+Built via subagent-driven development from `docs/superpowers/plans/2026-05-31-living-catalog-phase-a-ui.md`
+(plan-ready Tasks 10–12). Tree builder unit-tested; Ink view gated by typecheck + lint.
+Green gate: typecheck 16/16, lint clean, utils 38/38.
+
+New: `packages/utils/src/catalog/tree.ts` (`buildCatalogTree`), `apps/cli/src/views/catalog-editor/`
+(`index.tsx` + `persist.ts`), route `/wiki/catalog-editor`, wiki-home entry "目录编辑器", i18n keys.
+
+### Final review findings (opus reviewer)
+- **[Resolved] ESC in sub-modes exited the editor + dropped edits.** The editor never claimed ESC,
+  so the Layout's global ESC ran `navigate(-1)` even while the footer said "ESC 取消". Fixed with
+  `useEscHandler` claim/release around sub-modes + `key.escape`→browse handler (mirrors config-apikey).
+- **[Resolved] Hard-coded strings.** i18n'd the remaining labels (empty/dirty/rename/add/move/uncategorized).
+- **[Deferred — minor] UX nits:** add does not move cursor to the new page; new page inherits the
+  selected page's `group`; new pages default `level: 'Intermediate'` (no UI to set). Acceptable for Phase A.
+
+### ⚠️ Interactive smoke NOT yet performed
+Phase A-UI was built and verified ONLY by typecheck + lint + tree-builder unit tests. No one has run
+`bun run dev` to drive the Ink TUI. Human should smoke-test (requires a completed wiki under `.open-zread/`):
+1. ESC inside rename/add/move cancels back to browse (does NOT exit the editor / lose edits).
+2. Save (`s`) round-trip: wiki.json rewritten, sidebar/index/glossary regenerated, provider reloads,
+   glossary + techStackSummary intact (not wiped).
+3. Edge catalogs (tombstoned-only / single-page sections): no crash, cursor stays in bounds.
+
+## Deferred scope (follow-on plans, not built)
 - Phase B: reconciliation (Tasks 14–23).
 - Phase C: topic scopes + deep-dive (Tasks 24–29).
