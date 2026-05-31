@@ -12,7 +12,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { useWiki } from '../../provider';
+import { useWiki, useEscHandler } from '../../provider';
 import { useI18n } from '../../i18n';
 import Divider from '../../components/Divider';
 import {
@@ -22,7 +22,7 @@ import {
   type CatalogEvent,
   type CatalogProposal,
 } from '@open-zread/orchestrator';
-import { applyMergePlan, loadCachedSymbols } from '@open-zread/utils';
+import { applyMergePlan, loadCachedSymbols, finalizeWiki, getWikiDir } from '@open-zread/utils';
 import type { WikiPage } from '@open-zread/types';
 
 // ─── Phase ────────────────────────────────────────────────────────────────────
@@ -100,6 +100,7 @@ function mapEventToStatus(event: CatalogEvent): string {
 export default function CatalogMergePage() {
   const { t } = useI18n();
   const { reload } = useWiki();
+  const { claimEsc, releaseEsc } = useEscHandler();
 
   const [phase, setPhase] = useState<Phase>('proposing');
   const [status, setStatus] = useState('');
@@ -116,6 +117,16 @@ export default function CatalogMergePage() {
   const [cursor, setCursor] = useState(0);
 
   const hasStarted = useRef(false);
+
+  // ── Claim ESC while busy so Layout cannot navigate away ───────────────────
+  useEffect(() => {
+    if (phase === 'proposing' || phase === 'applying') {
+      claimEsc();
+    } else {
+      releaseEsc();
+    }
+    return () => releaseEsc();
+  }, [phase, claimEsc, releaseEsc]);
 
   // ── Start proposing on mount ───────────────────────────────────────────────
   useEffect(() => {
@@ -177,6 +188,10 @@ export default function CatalogMergePage() {
               setStatus(`生成中… (${ev.slug})`);
             },
           });
+          // generateWikiContent's internal finalize used only the regenerated subset,
+          // which clobbers _sidebar.md / source-index. Re-finalize with the FULL merged
+          // page set so the navigation reflects the whole catalog.
+          await finalizeWiki(getWikiDir(), { pages, glossary: p.remote.glossary });
         }
         await reload();
         setPhase('done');
