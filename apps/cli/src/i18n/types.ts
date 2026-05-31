@@ -143,6 +143,12 @@ export interface TranslationKeys {
     failed: string;
     hintBrowse: string;
     hintEdit: string;
+    empty: string;
+    dirty: string;
+    renameLabel: string;
+    addLabel: string;
+    moveLabel: string;
+    uncategorized: string;
   };
   wikiGenerate: {
     catalogTitle: string;

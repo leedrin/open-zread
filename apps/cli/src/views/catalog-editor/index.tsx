@@ -5,11 +5,11 @@
  * 支持子模式：新增 (a) / 重命名 (r) / 移动 (m)。
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
-import { useWiki } from '../../provider';
+import { useWiki, useEscHandler } from '../../provider';
 import { useI18n } from '../../i18n';
 import {
   migrateCatalog,
@@ -28,6 +28,7 @@ import { persistCatalog } from './persist.js';
 export default function CatalogEditorPage() {
   const { t } = useI18n();
   const { wikiCatalog, reload } = useWiki();
+  const { claimEsc, releaseEsc } = useEscHandler();
 
   const [pages, setPages] = useState<WikiPage[]>(() =>
     wikiCatalog ? migrateCatalog(wikiCatalog).pages : []
@@ -47,8 +48,22 @@ export default function CatalogEditorPage() {
 
   const selected = tree.flat[cursor];
 
+  // Claim ESC while in a sub-mode so the Layout's global handler doesn't navigate away.
+  // In browse mode, release so the Layout can handle ESC (navigate back out of editor).
+  useEffect(() => {
+    if (mode !== 'browse') {
+      claimEsc();
+    } else {
+      releaseEsc();
+    }
+    return () => releaseEsc();
+  }, [mode, claimEsc, releaseEsc]);
+
   useInput((input, key) => {
-    if (mode !== 'browse') return; // sub-mode inputs handle their own keys
+    if (mode !== 'browse') {
+      if (key.escape) { setMode('browse'); setDraft(''); }
+      return; // other keys go to the focused TextInput/SelectInput
+    }
 
     if (key.upArrow || input === 'k') {
       setCursor((c) => Math.max(0, c - 1));
@@ -121,7 +136,7 @@ export default function CatalogEditorPage() {
       <Box flexDirection="column">
         <Divider title={t('catalogEditor.title')} />
         <Box marginTop={1}>
-          <Text dimColor>暂无目录</Text>
+          <Text dimColor>{t('catalogEditor.empty')}</Text>
         </Box>
       </Box>
     );
@@ -137,7 +152,7 @@ export default function CatalogEditorPage() {
           {status === 'saving' && <Text color="yellow">{t('catalogEditor.saving')}</Text>}
           {status === 'saved' && <Text color="green">{t('catalogEditor.saved')}</Text>}
           {status === 'failed' && <Text color="red">{t('catalogEditor.failed')}</Text>}
-          {status === 'idle' && dirty && <Text color="yellow">* 未保存更改</Text>}
+          {status === 'idle' && dirty && <Text color="yellow">* {t('catalogEditor.dirty')}</Text>}
         </Box>
       )}
 
@@ -211,7 +226,7 @@ export default function CatalogEditorPage() {
       {/* Sub-mode: rename */}
       {mode === 'rename' && (
         <Box marginTop={1}>
-          <Text>重命名：</Text>
+          <Text>{t('catalogEditor.renameLabel')}</Text>
           <TextInput
             value={draft}
             onChange={setDraft}
@@ -231,7 +246,7 @@ export default function CatalogEditorPage() {
       {/* Sub-mode: add */}
       {mode === 'add' && (
         <Box marginTop={1}>
-          <Text>新增页面标题：</Text>
+          <Text>{t('catalogEditor.addLabel')}</Text>
           <TextInput
             value={draft}
             onChange={setDraft}
@@ -244,7 +259,7 @@ export default function CatalogEditorPage() {
                     slug,
                     title,
                     file: `${slug}.md`,
-                    section: selected?.section ?? '未分类',
+                    section: selected?.section ?? t('catalogEditor.uncategorized'),
                     group: selected?.group,
                     level: 'Intermediate',
                   })
@@ -260,7 +275,7 @@ export default function CatalogEditorPage() {
       {/* Sub-mode: move */}
       {mode === 'move' && (
         <Box flexDirection="column" marginTop={1}>
-          <Text>移动到分区：</Text>
+          <Text>{t('catalogEditor.moveLabel')}</Text>
           <SelectInput
             items={[
               ...new Set(

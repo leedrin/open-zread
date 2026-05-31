@@ -141,6 +141,12 @@ export const zhCN: TranslationKeys = {
     failed: '保存失败',
     hintBrowse: 'a 新增 | r 重命名 | m 移动 | l 锁定 | x 删除 | u 恢复 | p 深度 | s 保存 | ESC 返回',
     hintEdit: '输入后回车确认 | ESC 取消',
+    empty: '暂无目录',
+    dirty: '未保存更改',
+    renameLabel: '重命名：',
+    addLabel: '新增页面标题：',
+    moveLabel: '移动到分区：',
+    uncategorized: '未分类',
   },
   browse: {
     title: 'Zread — Wiki 文档浏览',

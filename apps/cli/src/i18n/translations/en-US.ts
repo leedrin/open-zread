@@ -141,6 +141,12 @@ export const enUS: TranslationKeys = {
     failed: 'Save failed',
     hintBrowse: 'a Add | r Rename | m Move | l Lock | x Delete | u Restore | p Depth | s Save | ESC Back',
     hintEdit: 'Enter to confirm | ESC to cancel',
+    empty: 'No catalog yet',
+    dirty: 'Unsaved changes',
+    renameLabel: 'Rename: ',
+    addLabel: 'New page title: ',
+    moveLabel: 'Move to section: ',
+    uncategorized: 'Uncategorized',
   },
   browse: {
     title: 'Zread — Wiki Browser',
