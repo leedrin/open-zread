@@ -24,6 +24,7 @@ import ConfigRetryPage from "./views/config-retry";
 // Wiki 模块页面
 import WikiHomePage from "./views/wiki-home";
 import WikiGeneratePage from "./views/wiki-generate";
+import CatalogEditorPage from "./views/catalog-editor";
 import BrowsePage from "./views/browse";
 
 interface AppOptions {
@@ -85,6 +86,10 @@ function AppContent({ initialEntries }: AppOptions) {
                     <Route
                       path="/wiki/generate"
                       element={<WikiGeneratePage />}
+                    />
+                    <Route
+                      path="/wiki/catalog-editor"
+                      element={<CatalogEditorPage />}
                     />
                   </Route>
                   {/* ========== Browse 模块路由 ========== */}
