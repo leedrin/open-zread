@@ -40,17 +40,17 @@
 
 ### B2. Regenerate-as-Proposal Flow
 
-- [ ] B2.1 Run Catalog Agent to produce REMOTE without overwriting live `wiki.json`
-- [ ] B2.2 Produce `CatalogMergePlan` from BASE × LOCAL × REMOTE
-- [ ] B2.3 Glossary-anchored naming: update `generate-catalog.ts` so the Catalog Agent names pages from canonical glossary terms (collapse aliases) and records each page's `concepts`
+- [x] B2.1 Run Catalog Agent to produce REMOTE without overwriting live `wiki.json`
+- [x] B2.2 Produce `CatalogMergePlan` from BASE × LOCAL × REMOTE
+- [x] B2.3 Glossary-anchored naming: update `generate-catalog.ts` so the Catalog Agent names pages from canonical glossary terms (collapse aliases) and records each page's `concepts`
 
 ### B3. TUI Merge Review
 
-- [ ] B3.1 Review view: list ADD/APPLY/CONFLICT/REMOVE; batch-accept clean updates; per-node decide conflicts
-- [ ] B3.2 On confirm: write merged `wiki.json` + finalize; generate only added/accepted-updated pages (skip locked/unchanged)
-- [ ] B3.3 wiki-home entry "重新生成（合并）" alongside `force`; i18n
+- [x] B3.1 Review view: list ADD/APPLY/CONFLICT/REMOVE; batch-accept clean updates; per-node decide conflicts
+- [x] B3.2 On confirm: write merged `wiki.json` + finalize; generate only added/accepted-updated pages (skip locked/unchanged)
+- [x] B3.3 wiki-home entry "重新生成（合并）" alongside `force`; i18n
 - [ ] B3.4 Verify diataxis-migration: REMOTE with new tracks → ADD proposals, existing content preserved
-- [ ] B3.5 Run `bun run typecheck` and `bun run lint`
+- [x] B3.5 Run `bun run typecheck` and `bun run lint`
 
 ## Phase C — Topic Scopes + Deep-Dive
 

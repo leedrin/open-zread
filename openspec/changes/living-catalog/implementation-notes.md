@@ -78,9 +78,31 @@ tombstone respect + `ensureUniqueIds`), `base-loader.ts` (`loadBaseFromSnapshot`
 ### Thresholds (design open-question — chosen defaults)
 `CONCEPT_THRESHOLD = 0.5`, `FINGERPRINT_THRESHOLD = 0.5` (exported consts in `align.ts`, tunable).
 
+## Phase B-Flow (reconciliation flow + review UI) — built 2026-05-31
+
+Built via subagent-driven development from `docs/superpowers/plans/2026-05-31-living-catalog-phase-b-flow.md`
+(plan-ready B2/B3). Green gate: typecheck 16/16, lint clean, utils 73/73, orchestrator 42/42.
+
+New: `packages/utils/src/catalog/apply.ts` (`applyMergePlan` — decisions → merged pages + toGenerate, unit-tested),
+`packages/orchestrator/src/wiki/reconcile.ts` (`generateCatalogProposal` backup/restore around the Catalog Agent
+so the live wiki.json is never clobbered; `persistMergedCatalog`), glossary-anchored naming + `concepts` backfill
+in `generate-catalog.ts`, and the Ink merge-review view `apps/cli/src/views/catalog-merge/` with route
+`/wiki/catalog-merge` and wiki-home entry "重新生成（合并）".
+
+### Verification status
+- **Unit-tested**: `applyMergePlan` (7 tests) — add/update/reject/conflict-local|remote/remove/locked-skip.
+- **Typecheck + lint only** (NOT interactively verified — needs a live LLM run + provider config):
+  the proposal orchestration, the glossary-anchored naming (LLM behavior), and the entire TUI merge-review flow.
+
+### ⚠️ Manual smoke checklist (human, requires live LLM + a completed `.open-zread/` wiki)
+- **V2**: edit + lock a page in the catalog editor, then run "重新生成（合并）". Confirm: proposal generates without
+  clobbering live wiki.json; the locked page never appears as update/conflict (kept); conflicts are reviewable;
+  on confirm only accepted adds/updates regenerate (locked/unchanged skipped); `_sidebar`/glossary refresh.
+- **V3** (diataxis-migration): on a pre-diataxis wiki (explanation-only), run "重新生成（合并）". Confirm the new
+  Tutorial/How-to/Reference track pages appear as ADD proposals and existing pages are preserved (not add+remove).
+- **Crash-window note**: `generateCatalogProposal` overwrites then restores wiki.json; a process kill between the
+  agent write and the restore could leave wiki.json as REMOTE. Acceptable v1 risk; revisit with a temp-path write.
+- **B3.4** (verify diataxis-migration) left unchecked in tasks.md pending this live V3 smoke.
+
 ## Deferred scope (follow-on plans, not built)
-- **Phase B-Flow** (plan-ready B2/B3): regenerate-as-proposal (run Catalog Agent → REMOTE without overwriting;
-  glossary-anchored naming in `generate-catalog.ts`), TUI merge-review view (accept/reject per node; on confirm
-  write+finalize+generate only added/accepted), wiki-home "重新生成（合并）" entry, diataxis-migration smoke.
-  Needs a live Catalog Agent (LLM) + Ink UI — not unit-verifiable here.
 - **Phase C**: topic scopes + deep-dive (Tasks 24–29).
