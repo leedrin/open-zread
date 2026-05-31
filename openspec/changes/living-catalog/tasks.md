@@ -56,18 +56,18 @@
 
 ### C1. Topic Scopes
 
-- [ ] C1.1 `TopicScope` persistence under `.open-zread/wiki/scopes/<name>.json` (save/list/load); ignore stale ids
-- [ ] C1.2 Editor: save current selection as named scope; load scope → restore selection
-- [ ] C1.3 Scope-restricted operation plumbing (operations limited to scope ids)
-- [ ] C1.4 Unit tests for scope save/load + stale-id tolerance
+- [x] C1.1 `TopicScope` persistence under `.open-zread/wiki/scopes/<name>.json` (save/list/load); ignore stale ids
+- [x] C1.2 Editor: save current selection as named scope; load scope → restore selection
+- [x] C1.3 Scope-restricted operation plumbing (operations limited to scope ids)
+- [x] C1.4 Unit tests for scope save/load + stale-id tolerance
 
 ### C2. Deep-Dive (explode into sub-tree)
 
-- [ ] C2.1 Scoped Catalog Agent mode: given a topic (page/scope), propose a focused sub-catalog of child pages anchored to real files, bounded count
-- [ ] C2.2 Child pages inherit parent section/group, `origin: 'ai'`; merge back via the reconciliation engine (review as ADDs)
-- [ ] C2.3 Protect locked parent during deep-dive; support recursive deep-dive on a child
-- [ ] C2.4 Editor entry: deep-dive a selected page/scope
-- [ ] C2.5 Run `bun run typecheck` and `bun run lint`
+- [x] C2.1 Scoped Catalog Agent mode: given a topic (page/scope), propose a focused sub-catalog of child pages anchored to real files, bounded count
+- [x] C2.2 Child pages inherit parent section/group, `origin: 'ai'`; merge back via the reconciliation engine (review as ADDs)
+- [x] C2.3 Protect locked parent during deep-dive; support recursive deep-dive on a child
+- [x] C2.4 Editor entry: deep-dive a selected page/scope
+- [x] C2.5 Run `bun run typecheck` and `bun run lint`
 
 ## Verification (per phase)
 
