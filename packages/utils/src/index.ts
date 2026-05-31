@@ -41,7 +41,7 @@ export {
 export { generateSnapshotName, createVersionSnapshot } from './storage/versioning.js';
 
 // Catalog
-export { deriveId, migrateCatalog, buildCatalogTree, addPage, updatePage, tombstonePage, movePage, toggleLock, setDepth } from './catalog/index.js';
+export { deriveId, migrateCatalog, buildCatalogTree, addPage, updatePage, tombstonePage, movePage, toggleLock, setDepth, computeMergePlan, alignRemote, loadBaseFromSnapshot } from './catalog/index.js';
 export type { CatalogTree, CatalogTreeSection, CatalogTreeGroup } from './catalog/index.js';
 
 // Output

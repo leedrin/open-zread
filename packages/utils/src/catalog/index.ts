@@ -5,3 +5,4 @@ export type { CatalogTree, CatalogTreeSection, CatalogTreeGroup } from './tree.j
 export { jaccard, pageContentEqual, alignRemote, CONCEPT_THRESHOLD, FINGERPRINT_THRESHOLD } from './align.js';
 export { computeMergePlan } from './merge.js';
 export type { MergeInput } from './merge.js';
+export { loadBaseFromSnapshot } from './base-loader.js';
