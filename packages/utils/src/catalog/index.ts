@@ -8,3 +8,4 @@ export type { MergeInput } from './merge.js';
 export { loadBaseFromSnapshot } from './base-loader.js';
 export { applyMergePlan } from './apply.js';
 export type { MergeDecisions, ApplyResult } from './apply.js';
+export { saveScope, listScopes, loadScope, resolveScope } from './scopes.js';
