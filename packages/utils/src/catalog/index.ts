@@ -6,3 +6,5 @@ export { jaccard, pageContentEqual, alignRemote, CONCEPT_THRESHOLD, FINGERPRINT_
 export { computeMergePlan } from './merge.js';
 export type { MergeInput } from './merge.js';
 export { loadBaseFromSnapshot } from './base-loader.js';
+export { applyMergePlan } from './apply.js';
+export type { MergeDecisions, ApplyResult } from './apply.js';

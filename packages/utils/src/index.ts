@@ -41,8 +41,8 @@ export {
 export { generateSnapshotName, createVersionSnapshot } from './storage/versioning.js';
 
 // Catalog
-export { deriveId, migrateCatalog, buildCatalogTree, addPage, updatePage, tombstonePage, movePage, toggleLock, setDepth, computeMergePlan, alignRemote, loadBaseFromSnapshot } from './catalog/index.js';
-export type { CatalogTree, CatalogTreeSection, CatalogTreeGroup } from './catalog/index.js';
+export { deriveId, migrateCatalog, buildCatalogTree, addPage, updatePage, tombstonePage, movePage, toggleLock, setDepth, computeMergePlan, alignRemote, loadBaseFromSnapshot, applyMergePlan } from './catalog/index.js';
+export type { CatalogTree, CatalogTreeSection, CatalogTreeGroup, MergeDecisions, ApplyResult } from './catalog/index.js';
 
 // Output
 export { generateWikiJson, loadWikiBlueprint } from './output/wiki-content.js';
