@@ -3,3 +3,5 @@ export { addPage, updatePage, tombstonePage, movePage, toggleLock, setDepth } fr
 export { buildCatalogTree } from './tree.js';
 export type { CatalogTree, CatalogTreeSection, CatalogTreeGroup } from './tree.js';
 export { jaccard, pageContentEqual, alignRemote, CONCEPT_THRESHOLD, FINGERPRINT_THRESHOLD } from './align.js';
+export { computeMergePlan } from './merge.js';
+export type { MergeInput } from './merge.js';
