@@ -41,7 +41,7 @@ export {
 export { generateSnapshotName, createVersionSnapshot } from './storage/versioning.js';
 
 // Catalog
-export { deriveId, migrateCatalog } from './catalog/index.js';
+export { deriveId, migrateCatalog, buildCatalogTree } from './catalog/index.js';
 
 // Output
 export { generateWikiJson, loadWikiBlueprint } from './output/wiki-content.js';
