@@ -74,6 +74,8 @@ function buildNormalSelectItems(
     items.push({ label: t('wiki.incremental'), value: 'incremental' });
     // 4.6 目录编辑器（文档已完成时显示）
     items.push({ label: t('wiki.catalogEditor'), value: 'catalog-editor' });
+    // 4.7 重新生成（合并）（文档已完成时显示）
+    items.push({ label: t('wiki.regenerateMerge'), value: 'regenerate-merge' });
   }
 
   // 5. 强制重新生成（wiki.json 存在）
@@ -135,6 +137,9 @@ export default function WikiHomePage() {
         break;
       case 'catalog-editor':
         navigate('/wiki/catalog-editor');
+        break;
+      case 'regenerate-merge':
+        navigate('/wiki/catalog-merge');
         break;
       case 'config':
         navigate('/config');

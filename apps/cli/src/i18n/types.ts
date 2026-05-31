@@ -135,6 +135,19 @@ export interface TranslationKeys {
     dividerInProgress: string;
     dividerComplete: string;
     catalogEditor: string;
+    regenerateMerge: string;
+  };
+  catalogMerge: {
+    title: string;
+    proposing: string;
+    applying: string;
+    done: string;
+    empty: string;
+    add: string;
+    update: string;
+    conflict: string;
+    remove: string;
+    hintReview: string;
   };
   catalogEditor: {
     title: string;

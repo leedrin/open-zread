@@ -25,6 +25,7 @@ import ConfigRetryPage from "./views/config-retry";
 import WikiHomePage from "./views/wiki-home";
 import WikiGeneratePage from "./views/wiki-generate";
 import CatalogEditorPage from "./views/catalog-editor";
+import CatalogMergePage from "./views/catalog-merge";
 import BrowsePage from "./views/browse";
 
 interface AppOptions {
@@ -90,6 +91,10 @@ function AppContent({ initialEntries }: AppOptions) {
                     <Route
                       path="/wiki/catalog-editor"
                       element={<CatalogEditorPage />}
+                    />
+                    <Route
+                      path="/wiki/catalog-merge"
+                      element={<CatalogMergePage />}
                     />
                   </Route>
                   {/* ========== Browse 模块路由 ========== */}
