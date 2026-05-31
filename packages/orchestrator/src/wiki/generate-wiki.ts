@@ -558,6 +558,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           pages,
           audit: true,
           factsMap: factsCollection,
+          glossary,
         });
         finalizeData.auditReport = reFinalize.auditReport;
       } catch (err) {
