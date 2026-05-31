@@ -12,11 +12,13 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
+import { useSearchParams } from 'react-router';
 import { useWiki, useEscHandler } from '../../provider';
 import { useI18n } from '../../i18n';
 import Divider from '../../components/Divider';
 import {
   generateCatalogProposal,
+  generateDeepDiveProposal,
   persistMergedCatalog,
   generateWikiContent,
   type CatalogEvent,
@@ -101,6 +103,8 @@ export default function CatalogMergePage() {
   const { t } = useI18n();
   const { reload } = useWiki();
   const { claimEsc, releaseEsc } = useEscHandler();
+  const [params] = useSearchParams();
+  const deepDiveId = params.get('deepDive');
 
   const [phase, setPhase] = useState<Phase>('proposing');
   const [status, setStatus] = useState('');
@@ -140,7 +144,11 @@ export default function CatalogMergePage() {
       setStatus(mapEventToStatus(event));
     };
 
-    generateCatalogProposal(handleAgentEvent)
+    const proposalPromise = deepDiveId
+      ? generateDeepDiveProposal(deepDiveId, handleAgentEvent)
+      : generateCatalogProposal(handleAgentEvent);
+
+    proposalPromise
       .then((p) => {
         setProposal(p);
         const built = buildRows(p);
@@ -158,7 +166,7 @@ export default function CatalogMergePage() {
         setErrorMsg(msg);
         setPhase('error');
       });
-  }, [t]);
+  }, [t, deepDiveId]);
 
   // ── Apply decisions ────────────────────────────────────────────────────────
   const applyDecisions = () => {
@@ -288,7 +296,7 @@ export default function CatalogMergePage() {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <Box flexDirection="column">
-      <Divider title={t('catalogMerge.title')} />
+      <Divider title={deepDiveId ? t('catalogMerge.deepDiveTitle') : t('catalogMerge.title')} />
 
       {/* Proposing */}
       {phase === 'proposing' && (

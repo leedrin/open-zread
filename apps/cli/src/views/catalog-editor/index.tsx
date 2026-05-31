@@ -9,6 +9,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
+import { useNavigate } from 'react-router';
 import { useWiki, useEscHandler } from '../../provider';
 import { useI18n } from '../../i18n';
 import {
@@ -20,6 +21,10 @@ import {
   updatePage,
   addPage,
   movePage,
+  saveScope,
+  listScopes,
+  loadScope,
+  resolveScope,
 } from '@open-zread/utils';
 import type { WikiPage } from '@open-zread/types';
 import Divider from '../../components/Divider';
@@ -29,6 +34,7 @@ export default function CatalogEditorPage() {
   const { t } = useI18n();
   const { wikiCatalog, reload } = useWiki();
   const { claimEsc, releaseEsc } = useEscHandler();
+  const navigate = useNavigate();
 
   const [pages, setPages] = useState<WikiPage[]>(() =>
     wikiCatalog ? migrateCatalog(wikiCatalog).pages : []
@@ -43,8 +49,9 @@ export default function CatalogEditorPage() {
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
   const [dirty, setDirty] = useState(false);
 
-  const [mode, setMode] = useState<'browse' | 'add' | 'rename' | 'move'>('browse');
+  const [mode, setMode] = useState<'browse' | 'add' | 'rename' | 'move' | 'saveScope' | 'loadScope'>('browse');
   const [draft, setDraft] = useState('');
+  const [selection, setSelection] = useState<Set<string>>(new Set());
 
   const selected = tree.flat[cursor];
 
@@ -113,7 +120,6 @@ export default function CatalogEditorPage() {
     }
 
     if (input === 'r') {
-      const id = selected?.id;
       if (!id) return;
       setDraft(selected.title);
       setMode('rename');
@@ -125,8 +131,37 @@ export default function CatalogEditorPage() {
       return;
     }
     if (input === 'm') {
-      if (!selected?.id) return;
+      if (!id) return;
       setMode('move');
+      return;
+    }
+
+    if (!id) return;
+
+    if (input === 'v') {
+      setSelection((s) => {
+        const n = new Set(s);
+        if (n.has(id)) n.delete(id);
+        else n.add(id);
+        return n;
+      });
+      return;
+    }
+    if (input === 'S') {
+      if (selection.size > 0) {
+        setDraft('');
+        setMode('saveScope');
+      }
+      return;
+    }
+    if (input === 'L') {
+      if (listScopes().length > 0) {
+        setMode('loadScope');
+      }
+      return;
+    }
+    if (input === 'D') {
+      void navigate(`/wiki/catalog-merge?deepDive=${id}`);
       return;
     }
   });
@@ -165,6 +200,7 @@ export default function CatalogEditorPage() {
             {/* Direct pages (no group) */}
             {section.directPages.map((page) => {
               const isSelected = tree.flat[cursor]?.id === page.id;
+              const inSelection = selection.has(page.id ?? '');
               return (
                 <Box key={page.id ?? page.slug} marginLeft={2}>
                   <Text
@@ -178,6 +214,7 @@ export default function CatalogEditorPage() {
                     }
                   >
                     {isSelected ? '│ ' : '  '}
+                    {inSelection ? '* ' : ''}
                     {page.title}
                     {page.locked ? ' 🔒' : ''}
                     {page.depth === 'deep' ? ' [deep]' : ''}
@@ -196,6 +233,7 @@ export default function CatalogEditorPage() {
                 {/* Group pages */}
                 {grp.pages.map((page) => {
                   const isSelected = tree.flat[cursor]?.id === page.id;
+                  const inSelection = selection.has(page.id ?? '');
                   return (
                     <Box key={page.id ?? page.slug} marginLeft={2}>
                       <Text
@@ -209,6 +247,7 @@ export default function CatalogEditorPage() {
                         }
                       >
                         {isSelected ? '│ ' : '  '}
+                        {inSelection ? '* ' : ''}
                         {page.title}
                         {page.locked ? ' 🔒' : ''}
                         {page.depth === 'deep' ? ' [deep]' : ''}
@@ -287,6 +326,43 @@ export default function CatalogEditorPage() {
               if (id) {
                 setPages((ps) => movePage(ps, id, item.value));
                 setDirty(true);
+              }
+              setMode('browse');
+            }}
+          />
+        </Box>
+      )}
+
+      {/* Sub-mode: saveScope */}
+      {mode === 'saveScope' && (
+        <Box marginTop={1}>
+          <Text>{t('catalogEditor.saveScopeLabel')}</Text>
+          <TextInput
+            value={draft}
+            onChange={setDraft}
+            onSubmit={() => {
+              const name = draft.trim();
+              if (name) {
+                saveScope({ name, pageIds: [...selection], createdAt: new Date().toISOString() });
+                setSelection(new Set());
+              }
+              setMode('browse');
+            }}
+          />
+        </Box>
+      )}
+
+      {/* Sub-mode: loadScope */}
+      {mode === 'loadScope' && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text>{t('catalogEditor.loadScopeLabel')}</Text>
+          <SelectInput
+            items={listScopes().map((s) => ({ label: s.name, value: s.name }))}
+            onSelect={(item) => {
+              const sc = loadScope(item.value);
+              if (sc) {
+                const ids = resolveScope(sc, pages).map((p) => p.id).filter((x): x is string => !!x);
+                setSelection(new Set(ids));
               }
               setMode('browse');
             }}

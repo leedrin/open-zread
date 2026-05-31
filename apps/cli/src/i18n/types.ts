@@ -139,6 +139,7 @@ export interface TranslationKeys {
   };
   catalogMerge: {
     title: string;
+    deepDiveTitle: string;
     proposing: string;
     applying: string;
     done: string;
@@ -162,6 +163,8 @@ export interface TranslationKeys {
     addLabel: string;
     moveLabel: string;
     uncategorized: string;
+    saveScopeLabel: string;
+    loadScopeLabel: string;
   };
   wikiGenerate: {
     catalogTitle: string;

@@ -137,6 +137,7 @@ export const enUS: TranslationKeys = {
   },
   catalogMerge: {
     title: 'Regenerate (merge)',
+    deepDiveTitle: 'Deep-dive (merge)',
     proposing: 'Generating proposal…',
     applying: 'Applying and generating…',
     done: 'Merge complete ✓',
@@ -152,7 +153,7 @@ export const enUS: TranslationKeys = {
     saving: 'Saving…',
     saved: 'Saved ✓',
     failed: 'Save failed',
-    hintBrowse: 'a Add | r Rename | m Move | l Lock | x Delete | u Restore | p Depth | s Save | ESC Back',
+    hintBrowse: 'a Add | r Rename | m Move | l Lock | x Delete | u Restore | p Depth | s Save | v Select | S SaveScope | L LoadScope | D DeepDive | ESC Back',
     hintEdit: 'Enter to confirm | ESC to cancel',
     empty: 'No catalog yet',
     dirty: 'Unsaved changes',
@@ -160,6 +161,8 @@ export const enUS: TranslationKeys = {
     addLabel: 'New page title: ',
     moveLabel: 'Move to section: ',
     uncategorized: 'Uncategorized',
+    saveScopeLabel: 'Scope name: ',
+    loadScopeLabel: 'Load scope: ',
   },
   browse: {
     title: 'Zread — Wiki Browser',

@@ -137,6 +137,7 @@ export const zhCN: TranslationKeys = {
   },
   catalogMerge: {
     title: '重新生成（合并）',
+    deepDiveTitle: '深挖（合并）',
     proposing: '生成提案中…',
     applying: '应用并生成中…',
     done: '合并完成 ✓',
@@ -152,7 +153,7 @@ export const zhCN: TranslationKeys = {
     saving: '保存中…',
     saved: '已保存 ✓',
     failed: '保存失败',
-    hintBrowse: 'a 新增 | r 重命名 | m 移动 | l 锁定 | x 删除 | u 恢复 | p 深度 | s 保存 | ESC 返回',
+    hintBrowse: 'a 新增 | r 重命名 | m 移动 | l 锁定 | x 删除 | u 恢复 | p 深度 | s 保存 | v 选择 | S 存集合 | L 载集合 | D 深挖 | ESC 返回',
     hintEdit: '输入后回车确认 | ESC 取消',
     empty: '暂无目录',
     dirty: '未保存更改',
@@ -160,6 +161,8 @@ export const zhCN: TranslationKeys = {
     addLabel: '新增页面标题：',
     moveLabel: '移动到分区：',
     uncategorized: '未分类',
+    saveScopeLabel: '集合名称：',
+    loadScopeLabel: '载入集合：',
   },
   browse: {
     title: 'Zread — Wiki 文档浏览',
