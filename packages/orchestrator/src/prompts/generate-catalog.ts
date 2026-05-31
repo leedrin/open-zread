@@ -59,6 +59,12 @@ export default `你是一个顶级的软件架构师和领域驱动设计（DDD�
 }
 \`\`\`
 
+### Step 6: 术语锚定命名与 concepts 回填（强制）
+
+1. **命名锚定**：为页面取 title/slug 时，优先采用 Glossary 中的**规范术语**（canonical term）。若某概念有别名/旧称，统一收敛到规范名，从源头减少跨次生成的标题漂移。
+2. **回填 concepts**：每个 page 必须填写 concepts 数组——列出该页作为**权威归属**的规范术语（即 glossary 中 canonicalPage 指向该页的术语）。一页可对应多个术语（如"技能与战斗" -> ["技能","战斗"]）。
+3. 目的：后续"重新生成（合并）"时按概念对齐页面身份，使改名的页面被识别为同一页（更新）而非"删除+新增"。
+
 ---
 
 ## Wiki 结构规范
@@ -108,6 +114,7 @@ export default `你是一个顶级的软件架构师和领域驱动设计（DDD�
       "section": "核心网络引擎",
       "group": "底层传输协议",
       "level": "Advanced",
+      "concepts": ["连接池"],
       "associatedFiles":[
         "packages/core/src/net/",
         "packages/types/src/socket.d.ts"
@@ -120,6 +127,7 @@ export default `你是一个顶级的软件架构师和领域驱动设计（DDD�
       "section": "核心网络引擎",
       "group": "高层协议适配",
       "level": "Intermediate",
+      "concepts": ["基数树路由"],
       "associatedFiles":[
         "packages/router/src/tree.ts",
         "packages/router/src/parser/"
