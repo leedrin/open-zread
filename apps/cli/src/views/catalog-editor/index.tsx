@@ -136,17 +136,8 @@ export default function CatalogEditorPage() {
       return;
     }
 
-    if (!id) return;
-
-    if (input === 'v') {
-      setSelection((s) => {
-        const n = new Set(s);
-        if (n.has(id)) n.delete(id);
-        else n.add(id);
-        return n;
-      });
-      return;
-    }
+    // Scope save/load operate on the selection Set / scope files — they do NOT
+    // require a currently-selected page, so they must run before the id guard.
     if (input === 'S') {
       if (selection.size > 0) {
         setDraft('');
@@ -158,6 +149,18 @@ export default function CatalogEditorPage() {
       if (listScopes().length > 0) {
         setMode('loadScope');
       }
+      return;
+    }
+
+    if (!id) return;
+
+    if (input === 'v') {
+      setSelection((s) => {
+        const n = new Set(s);
+        if (n.has(id)) n.delete(id);
+        else n.add(id);
+        return n;
+      });
       return;
     }
     if (input === 'D') {

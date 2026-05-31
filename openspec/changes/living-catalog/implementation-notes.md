@@ -142,6 +142,19 @@ deep-dived (recursive) via the same `D` key.
 - **Typecheck + lint only** (NOT interactively verified — needs a live LLM run): the deep-dive scoped agent,
   the editor scope/deep-dive wiring, and the merge-view `?deepDive` branch.
 
+### Final review findings (opus reviewer)
+- **[Resolved] `S`/`L` (save/load scope) were dead when no page selected.** They sat after an `if (!id) return`
+  guard but don't need a cursor page; moved above the guard.
+- **[Known behavior] Re-deep-diving the same topic replaces prior children.** Child ids are deterministic
+  (`deepdive-<parent>-<i>-<slug>`), so a second run with the same slug order idempotently replaces the first run's
+  children (manual edits to those children are lost). Different slug order → duplicates. Acceptable; document for users.
+- **[Deferred — minor] `existingIds` filter in `generateDeepDiveProposal` is mostly cosmetic** (children get
+  re-ided by normalize); it only drops an exact same-slug-as-existing child. Harmless.
+- **[Deferred — minor] Scope-name filename collision**: distinct names sanitizing to the same file overwrite
+  (e.g. `a b` / `a.b` → `a_b.json`). Low impact; no overwrite warning.
+- **[Deferred — minor] `selection` Set not pruned on delete**: a stale id self-heals via `resolveScope` on load.
+- **[Manual confirm] Capital `S`/`L`/`D` vs lowercase**: terminal delivers distinct uppercase chars; confirm in smoke.
+
 ### ⚠️ Manual smoke checklist (V4, human, live LLM)
 - Save a themed selection (`v` several pages → `S` name it), reload it (`L`) → selection restored (stale ids ignored).
 - `D` on a page → "深挖（合并）" runs the scoped agent → 3–6 anchored child pages appear as ADD proposals →
