@@ -14,5 +14,9 @@ export type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, Articl
 // Types
 export * from './types.js'
 
+// Phase B: Catalog Reconciliation
+export { generateCatalogProposal, persistMergedCatalog } from './wiki/reconcile.js';
+export type { CatalogProposal } from './wiki/reconcile.js';
+
 // Re-export TokenUsage from agent-sdk
 export type { TokenUsage } from '@open-zread/agent-sdk'
