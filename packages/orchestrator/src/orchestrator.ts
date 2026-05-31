@@ -13,6 +13,16 @@ import { GenerateBlueprintTool, ValidateBlueprintTool } from './tools/output-too
 import { GetCoreSignaturesTool, GetDirectoryTreeTool, GetModuleDetailsTool } from './tools/repo-map-tools.js';
 import type { BlueprintResult, CatalogEvent } from './types.js';
 
+/**
+ * Catalog/Blueprint Agent 的最大轮次。
+ *
+ * Catalog Agent 需要遍历整个项目的三层 Repo Map（目录树 → 核心签名 → 模块详情，
+ * 通常多次）并读取文件，之后才能调用 generate_blueprint。这比只处理单个模块的
+ * Page Agent（30 轮）重得多——大型代码库上 30 轮会在探索阶段耗尽，导致
+ * error_max_turns（蓝图从未产出）。给予充足余量。
+ */
+const CATALOG_AGENT_MAX_TURNS = 80;
+
 /** Blueprint Agent 工具列表 */
 const BLUEPRINT_TOOLS = [
   // 三层 Repo Map 工具
@@ -45,6 +55,7 @@ export async function generateWikiCatalog(
   const result = await createAgent({
     tools: BLUEPRINT_TOOLS,
     prompts: GenerateCatalog as string,
+    maxTurns: CATALOG_AGENT_MAX_TURNS,
     onEvent,
   });
 
@@ -63,6 +74,7 @@ export async function generateDeepDiveCatalog(
   const result = await createAgent({
     tools: BLUEPRINT_TOOLS,
     prompts: buildDeepDivePrompt(topic.title, topic.associatedFiles ?? []),
+    maxTurns: CATALOG_AGENT_MAX_TURNS,
     onEvent,
   });
   return { pagesCount: 0, durationMs: result.durationMs, tokenUsage: result.tokenUsage };
