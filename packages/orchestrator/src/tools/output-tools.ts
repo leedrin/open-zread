@@ -34,6 +34,11 @@ export const GenerateBlueprintTool: ToolDefinition = {
               type: 'array',
               items: { type: 'string' },
               description: '关联的源文件或目录路径（目录以 / 结尾）'
+            },
+            docType: {
+              type: 'string',
+              description: '文档类型：tutorial（教程）、howto（操作指南）、reference（API 参考）、explanation（原理解释，默认）',
+              enum: ['tutorial', 'howto', 'reference', 'explanation']
             }
           },
           required: ['slug', 'title', 'file', 'section']
@@ -94,11 +99,17 @@ export const GenerateBlueprintTool: ToolDefinition = {
 
       // Build result summary
       const groups = [...new Set(pages.map(p => p.group).filter(Boolean))]
+      const docTypes: Record<string, number> = {};
+      for (const p of pages) {
+        const dt = p.docType ?? 'explanation';
+        docTypes[dt] = (docTypes[dt] ?? 0) + 1;
+      }
       const summary = {
         outputPath,
         pagesCount: pages.length,
         sections: [...new Set(pages.map(p => p.section))],
         groups: groups.length > 0 ? groups : undefined,
+        docTypes,
         levels: {
           beginner: pages.filter(p => p.level === 'Beginner').length,
           intermediate: pages.filter(p => p.level === 'Intermediate').length,

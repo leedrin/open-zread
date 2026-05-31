@@ -20,6 +20,8 @@ import { buildSurgicalEditPrompt } from '../prompts/surgical-edit.js';
 import { buildRegeneratePrompt } from '../prompts/regenerate-with-feedback.js';
 import ArchitectPagePrompt from '../prompts/architect-page.js';
 import ReviewerPagePrompt from '../prompts/reviewer-page.js';
+import { buildTutorialPrompt, buildHowToPrompt } from './prompt-builders.js';
+import { buildReferencePrompt } from './reference-skeleton.js';
 import { extractPageFacts } from '@open-zread/repo-analyzer';
 import type { WikiPage, PageFacts, AffectedDoc, GlossaryTerm } from '@open-zread/types';
 import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './types.js';
@@ -59,7 +61,7 @@ function formatDoc(doc: string): string {
   return lines.join('\n              ');
 }
 
-function buildGlossarySection(glossary: GlossaryTerm[]): string {
+export function buildGlossarySection(glossary: GlossaryTerm[]): string {
   if (!glossary || glossary.length === 0) return '';
 
   const lines: string[] = [];
@@ -377,11 +379,38 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
             existingContent,
           });
           agentTools = [FileReadTool, FileEditTool, GlobTool, GrepTool, ReadPageTool, WritePageTool];
-        } else if (page.level === 'Advanced') {
-          return generatePageDualPass(page, facts, glossary, options, progress, pageStartTime);
         } else {
-          prompts = buildPagePrompt(page, facts, glossary);
-          agentTools = [FileReadTool, FileEditTool, GlobTool, GrepTool, WritePageTool];
+          const docType = page.docType ?? 'explanation';
+
+          switch (docType) {
+            case 'tutorial':
+              prompts = buildTutorialPrompt(page, facts, glossary);
+              agentTools = [FileReadTool, FileEditTool, GlobTool, GrepTool, WritePageTool];
+              break;
+            case 'howto':
+              prompts = buildHowToPrompt(page, facts, glossary);
+              agentTools = [FileReadTool, FileEditTool, GlobTool, GrepTool, WritePageTool];
+              break;
+            case 'reference':
+              prompts = buildReferencePrompt(page, facts ?? {
+                pageSlug: page.slug,
+                exports: [],
+                fileSummaries: [],
+                internalDeps: [],
+                externalDeps: [],
+                confidence: 0,
+              }, glossary);
+              agentTools = [FileReadTool, FileEditTool, GlobTool, GrepTool, WritePageTool];
+              break;
+            case 'explanation':
+            default:
+              if (page.level === 'Advanced') {
+                return generatePageDualPass(page, facts, glossary, options, progress, pageStartTime);
+              }
+              prompts = buildPagePrompt(page, facts, glossary);
+              agentTools = [FileReadTool, FileEditTool, GlobTool, GrepTool, WritePageTool];
+              break;
+          }
         }
 
         const result = await createAgent({

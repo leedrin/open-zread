@@ -19,7 +19,7 @@ export type { FileManifest, FileInfo } from './manifest.js'
 export type { SymbolManifest, SymbolInfo, ImportInfo } from './symbols.js'
 
 // Wiki types
-export type { WikiPage, WikiOutput, TechStackSummary, WikiLevel, GlossaryTerm } from './wiki.js'
+export type { WikiPage, WikiOutput, TechStackSummary, WikiLevel, DocType, GlossaryTerm } from './wiki.js'
 
 // Facts types
 export type { PageFacts, ExportFact, FileSummary } from './facts.js'

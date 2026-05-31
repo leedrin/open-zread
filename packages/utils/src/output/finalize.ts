@@ -100,7 +100,14 @@ function buildDocIndex(outputDir: string): void {
   writeFileSync(indexPath, JSON.stringify({ sourceToDocs, docToSources }, null, 2), 'utf-8');
 }
 
-function generateSidebar(outputDir: string, pages: WikiPage[]): void {
+export function generateSidebar(outputDir: string, pages: WikiPage[]): void {
+  const SECTION_ORDER: Record<string, number> = {
+    '入门指南': -1,
+    '上手教程': 0,
+    '操作指南': 1,
+    'API 参考': 99,
+  };
+
   const sections = new Map<string, Map<string, WikiPage[]>>();
 
   for (const page of pages) {
@@ -116,9 +123,16 @@ function generateSidebar(outputDir: string, pages: WikiPage[]): void {
     groups.get(groupKey)?.push(page);
   }
 
+  const sortedSections = [...sections.entries()].sort(([a], [b]) => {
+    const orderA = SECTION_ORDER[a] ?? 50;
+    const orderB = SECTION_ORDER[b] ?? 50;
+    if (orderA !== orderB) return orderA - orderB;
+    return 0;
+  });
+
   const lines: string[] = [];
 
-  for (const [section, groups] of sections) {
+  for (const [section, groups] of sortedSections) {
     lines.push(`- **${section}**`);
     for (const [group, groupPages] of groups) {
       if (group) {

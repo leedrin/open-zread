@@ -12,6 +12,8 @@
  */
 export type WikiLevel = 'Beginner' | 'Intermediate' | 'Advanced';
 
+export type DocType = 'tutorial' | 'howto' | 'reference' | 'explanation';
+
 /**
  * WikiPage - Wiki page definition
  */
@@ -33,6 +35,7 @@ export interface WikiPage {
    * 后续生成 Wiki 内容时，会读取这些路径获取上下文
    */
   associatedFiles?: string[];
+  docType?: DocType;
 }
 
 /**
