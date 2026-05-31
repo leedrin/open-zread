@@ -12,10 +12,11 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { useSearchParams } from 'react-router';
+import { useSearchParams, useNavigate } from 'react-router';
 import { useWiki, useEscHandler } from '../../provider';
 import { useI18n } from '../../i18n';
 import Divider from '../../components/Divider';
+import Spinner from '../../components/Spinner';
 import {
   generateCatalogProposal,
   generateDeepDiveProposal,
@@ -103,12 +104,17 @@ export default function CatalogMergePage() {
   const { t } = useI18n();
   const { reload } = useWiki();
   const { claimEsc, releaseEsc } = useEscHandler();
+  const navigate = useNavigate();
   const [params] = useSearchParams();
   const deepDiveId = params.get('deepDive');
 
   const [phase, setPhase] = useState<Phase>('proposing');
   const [status, setStatus] = useState('');
+  const [activity, setActivity] = useState('');
+  const [elapsed, setElapsed] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
+
+  const cancelledRef = useRef(false);
 
   const [proposal, setProposal] = useState<CatalogProposal | null>(null);
   const [rows, setRows] = useState<DecisionRow[]>([]);
@@ -122,7 +128,8 @@ export default function CatalogMergePage() {
 
   const hasStarted = useRef(false);
 
-  // ── Claim ESC while busy so Layout cannot navigate away ───────────────────
+  // ── Claim ESC while busy so the Layout doesn't also navigate; this view
+  //    handles ESC itself (abort → back) in useInput below. ───────────────────
   useEffect(() => {
     if (phase === 'proposing' || phase === 'applying') {
       claimEsc();
@@ -132,6 +139,16 @@ export default function CatalogMergePage() {
     return () => releaseEsc();
   }, [phase, claimEsc, releaseEsc]);
 
+  // ── Elapsed-time ticker while busy (constant "alive" feedback even when the
+  //    LLM is mid-response and no events arrive). ──────────────────────────────
+  useEffect(() => {
+    if (phase !== 'proposing' && phase !== 'applying') return;
+    const start = Date.now();
+    setElapsed(0);
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [phase]);
+
   // ── Start proposing on mount ───────────────────────────────────────────────
   useEffect(() => {
     if (hasStarted.current) return;
@@ -140,8 +157,9 @@ export default function CatalogMergePage() {
     setPhase('proposing');
     setStatus(t('catalogMerge.proposing'));
 
+    // Detailed (flickery) per-event line shown dim as secondary "activity".
     const handleAgentEvent = (event: CatalogEvent) => {
-      setStatus(mapEventToStatus(event));
+      setActivity(mapEventToStatus(event));
     };
 
     const proposalPromise = deepDiveId
@@ -150,6 +168,7 @@ export default function CatalogMergePage() {
 
     proposalPromise
       .then((p) => {
+        if (cancelledRef.current) return; // user aborted; do not enter review
         setProposal(p);
         const built = buildRows(p);
         setRows(built);
@@ -193,7 +212,7 @@ export default function CatalogMergePage() {
             pages: toGenerate,
             symbols: symbols ?? undefined,
             onEvent: (ev) => {
-              setStatus(`生成中… (${ev.slug})`);
+              setActivity(`${ev.slug}`);
             },
           });
           // generateWikiContent's internal finalize used only the regenerated subset,
@@ -201,10 +220,12 @@ export default function CatalogMergePage() {
           // page set so the navigation reflects the whole catalog.
           await finalizeWiki(getWikiDir(), { pages, glossary: p.remote.glossary });
         }
+        if (cancelledRef.current) return;
         await reload();
         setPhase('done');
       })
       .catch((err: unknown) => {
+        if (cancelledRef.current) return;
         const msg = err instanceof Error ? err.message : String(err);
         setErrorMsg(msg);
         setPhase('error');
@@ -213,6 +234,17 @@ export default function CatalogMergePage() {
 
   // ── Keyboard handling ──────────────────────────────────────────────────────
   useInput((input, key) => {
+    // Abort while busy: mark cancelled and go back. Proposing aborts safely
+    // (generateCatalogProposal restores wiki.json in its finally); applying may
+    // leave partially-generated pages, which the user can regenerate.
+    if (phase === 'proposing' || phase === 'applying') {
+      if (key.escape || input === 'q') {
+        cancelledRef.current = true;
+        releaseEsc();
+        void navigate(-1);
+      }
+      return;
+    }
     if (phase !== 'review') return;
 
     if (key.upArrow || input === 'k') {
@@ -298,10 +330,22 @@ export default function CatalogMergePage() {
     <Box flexDirection="column">
       <Divider title={deepDiveId ? t('catalogMerge.deepDiveTitle') : t('catalogMerge.title')} />
 
-      {/* Proposing */}
-      {phase === 'proposing' && (
-        <Box marginTop={1}>
-          <Text color="yellow">{status || t('catalogMerge.proposing')}</Text>
+      {/* Busy (proposing / applying): spinner + elapsed + live activity + abort */}
+      {(phase === 'proposing' || phase === 'applying') && (
+        <Box flexDirection="column" marginTop={1}>
+          <Box>
+            <Spinner />
+            <Text color="yellow"> {status || (phase === 'proposing' ? t('catalogMerge.proposing') : t('catalogMerge.applying'))}</Text>
+            <Text dimColor>  ({elapsed}s)</Text>
+          </Box>
+          {activity ? (
+            <Box marginTop={1}>
+              <Text dimColor>{t('catalogMerge.activity')}: {activity}</Text>
+            </Box>
+          ) : null}
+          <Box marginTop={1}>
+            <Text dimColor>{t('catalogMerge.hintBusy')}</Text>
+          </Box>
         </Box>
       )}
 
@@ -339,13 +383,6 @@ export default function CatalogMergePage() {
             <Text dimColor>{t('catalogMerge.hintReview')}</Text>
           </Box>
         </>
-      )}
-
-      {/* Applying */}
-      {phase === 'applying' && (
-        <Box marginTop={1}>
-          <Text color="yellow">{status || t('catalogMerge.applying')}</Text>
-        </Box>
       )}
 
       {/* Done */}

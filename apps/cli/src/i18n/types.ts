@@ -149,6 +149,8 @@ export interface TranslationKeys {
     conflict: string;
     remove: string;
     hintReview: string;
+    activity: string;
+    hintBusy: string;
   };
   catalogEditor: {
     title: string;

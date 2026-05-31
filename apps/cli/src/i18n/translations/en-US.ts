@@ -147,6 +147,8 @@ export const enUS: TranslationKeys = {
     conflict: 'Conflict',
     remove: 'Remove',
     hintReview: '↑/↓ navigate | space toggle | s confirm | ESC back',
+    activity: 'Activity',
+    hintBusy: 'ESC / q to abort and go back',
   },
   catalogEditor: {
     title: 'Catalog Editor',

@@ -147,6 +147,8 @@ export const zhCN: TranslationKeys = {
     conflict: '冲突',
     remove: '移除',
     hintReview: '↑/↓ 导航 | 空格 切换 | s 确认合并 | ESC 返回',
+    activity: '活动',
+    hintBusy: 'ESC / q 中止并返回',
   },
   catalogEditor: {
     title: '目录编辑器',
