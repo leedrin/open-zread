@@ -94,6 +94,20 @@ in `generate-catalog.ts`, and the Ink merge-review view `apps/cli/src/views/cata
 - **Typecheck + lint only** (NOT interactively verified — needs a live LLM run + provider config):
   the proposal orchestration, the glossary-anchored naming (LLM behavior), and the entire TUI merge-review flow.
 
+### Final review findings (opus reviewer)
+- **[Resolved] Critical: sidebar clobbered to the regenerated subset.** `generateWikiContent` runs its own
+  internal `finalizeWiki` with only `toGenerate`, overwriting `_sidebar.md` to those pages. Fixed by re-running
+  `finalizeWiki(getWikiDir(), { pages: <full merged>, glossary })` after generation.
+- **[Resolved] Important: ESC abandoned in-flight work.** The view now `claimEsc()` during proposing/applying so
+  ESC can't navigate away mid agent-run/generation; releases in review/done/error.
+- **[Deferred — minor] `migrateCatalog` cryptic error on malformed agent JSON** (no `pages`): caught by the TUI →
+  error phase, LOCAL restored, no data loss; just a poor message.
+- **[Deferred — minor] First-run leaves REMOTE wiki.json** when no local existed: largely unreachable (menu entry
+  only shows when a completed wiki exists).
+- **[Deferred — minor] Crash window** between agent overwrite and restore (inherent to backup/restore-in-place).
+- **[Deferred — minor] No defense-in-depth for locked pages in `applyMergePlan`** (unreachable: `computeMergePlan`
+  routes locked → kept, never into updates/conflicts/removes).
+
 ### ⚠️ Manual smoke checklist (human, requires live LLM + a completed `.open-zread/` wiki)
 - **V2**: edit + lock a page in the catalog editor, then run "重新生成（合并）". Confirm: proposal generates without
   clobbering live wiki.json; the locked page never appears as update/conflict (kept); conflicts are reviewable;
