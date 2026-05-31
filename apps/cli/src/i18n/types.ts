@@ -122,6 +122,7 @@ export interface TranslationKeys {
     continue: string;
     manage: string;
     browse: string;
+    incremental: string;
     force: string;
     firstTimeConfig: string;
     config: string;

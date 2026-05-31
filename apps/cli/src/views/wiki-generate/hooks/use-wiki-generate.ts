@@ -19,6 +19,8 @@ import type { WikiGenerateState, WikiPage } from "../types";
 interface UseWikiGenerateOptions {
   /** 强制重新生成（忽略现有 wiki.json） */
   forceRegenerate?: boolean;
+  /** 增量更新模式（仅重生受影响页面） */
+  incremental?: boolean;
 }
 
 interface UseWikiGenerateReturn {
@@ -57,6 +59,7 @@ type FlowState = 'idle' | 'catalog-generating' | 'waiting-pages' | 'articles-gen
 export function useWikiGenerate(options?: UseWikiGenerateOptions): UseWikiGenerateReturn {
   const { wikiCatalog, reload } = useWiki();
   const forceRegenerate = options?.forceRegenerate ?? false;
+  const incremental = options?.incremental ?? false;
 
 
   // 流程状态
@@ -134,6 +137,17 @@ export function useWikiGenerate(options?: UseWikiGenerateOptions): UseWikiGenera
       flowState === 'idle' &&
       !pagesInitializedRef.current
     ) {
+      // 增量更新模式：跳过 initialize（按文件存在性补缺），改走 diff 驱动的增量流程
+      if (incremental) {
+        if (!articlesStartedRef.current) {
+          pagesInitializedRef.current = true;
+          articlesStartedRef.current = true;
+          articles.actions.startIncremental();
+          setFlowState('articles-generating');
+        }
+        return;
+      }
+
       articles.actions.initialize().then((pendingPages) => {
         pagesInitializedRef.current = true;
         // 使用返回的 pendingPages，避免闭包陷阱
@@ -146,7 +160,7 @@ export function useWikiGenerate(options?: UseWikiGenerateOptions): UseWikiGenera
         }
       });
     }
-  }, [hasWikiCatalog, pages.length, articles.state.pendingCount]);
+  }, [hasWikiCatalog, pages.length, articles.state.pendingCount, incremental]);
 
   // 同步目录状态到 flowState
   useEffect(() => {

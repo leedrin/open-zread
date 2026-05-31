@@ -140,15 +140,16 @@ export function useCatalogGenerate({
         return;
       }
 
-      // 保存文件清单缓存（用于后续增量更新）
-      await saveCachedManifest(manifest);
-
       const symbols = await parseFiles(manifest);
       await saveCachedSymbols(symbols);
 
 
       // Phase 3: 调用 Agent
       await generateWikiCatalog(handleAgentEvent);
+
+      // 目录生成成功后再保存文件清单基线，作为下次增量 diff 的依据。
+      // 放在 Agent 成功之后，避免中途失败污染基线。
+      await saveCachedManifest(manifest);
 
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

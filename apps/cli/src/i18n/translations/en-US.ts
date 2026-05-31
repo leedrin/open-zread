@@ -120,6 +120,7 @@ export const enUS: TranslationKeys = {
     continue: 'Continue ({generated}/{total})',
     manage: 'Manage Documents',
     browse: 'Browse Documents',
+    incremental: 'Incremental Update',
     force: 'Force Regenerate',
     firstTimeConfig: 'Configure',
     config: 'Configuration',

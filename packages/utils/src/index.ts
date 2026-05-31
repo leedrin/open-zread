@@ -38,7 +38,6 @@ export {
 } from './cache/index.js';
 
 // Storage
-export { WikiStore } from './storage/wiki-store.js';
 export { generateSnapshotName, createVersionSnapshot } from './storage/versioning.js';
 
 // Output

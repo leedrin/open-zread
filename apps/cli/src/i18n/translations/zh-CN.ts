@@ -120,6 +120,7 @@ export const zhCN: TranslationKeys = {
     continue: '继续生成 ({generated}/{total})',
     manage: '管理文档',
     browse: '浏览文档',
+    incremental: '增量更新',
     force: '强制重新生成',
     firstTimeConfig: '配置',
     config: '配置',

@@ -70,6 +70,8 @@ function buildNormalSelectItems(
     items.push({ label: t('wiki.manage'), value: 'manage' });
     // 4. 浏览文档（文档已完成时显示）
     items.push({ label: t('wiki.browse'), value: 'browse' });
+    // 4.5 增量更新（文档已完成时显示，diff 源码仅重生受影响页面）
+    items.push({ label: t('wiki.incremental'), value: 'incremental' });
   }
 
   // 5. 强制重新生成（wiki.json 存在）
@@ -125,6 +127,9 @@ export default function WikiHomePage() {
         break;
       case 'force':
         navigate('/wiki/generate?mode=force');
+        break;
+      case 'incremental':
+        navigate('/wiki/generate?mode=incremental');
         break;
       case 'config':
         navigate('/config');
