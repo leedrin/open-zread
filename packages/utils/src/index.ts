@@ -70,6 +70,8 @@ export type {
   FinalizeResult,
 } from './output/finalize.js';
 
+export { renderGlossaryPage, ensureGlossaryPage, GLOSSARY_PAGE_ID } from './output/glossary-page.js';
+
 // Graph visualization
 export { buildGraphData } from './output/graph-data.js';
 

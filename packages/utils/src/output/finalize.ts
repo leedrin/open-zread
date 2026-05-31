@@ -1,14 +1,16 @@
-import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { join, extname, relative } from 'node:path';
-import type { WikiPage, PageFacts } from '@open-zread/types';
+import type { WikiPage, PageFacts, GlossaryTerm } from '@open-zread/types';
 import { logger } from '../logger.js';
 import { analyzeWiki } from './quality-audit.js';
 import type { QualityReport } from './quality-audit.js';
+import { ensureGlossaryPage, renderGlossaryPage, GLOSSARY_PAGE_ID, GLOSSARY_PAGE_SECTION, GLOSSARY_PAGE_FILE } from './glossary-page.js';
 
 export interface FinalizeOptions {
   audit?: boolean;
   pages?: WikiPage[];
   factsMap?: Map<string, PageFacts>;
+  glossary?: GlossaryTerm[];
 }
 
 export interface FinalizeResult {
@@ -164,6 +166,22 @@ export async function finalizeWiki(
     errors: [],
   };
 
+  // Glossary page: deterministically rendered, honors lock (locked => not refreshed).
+  let effectivePages = options?.pages;
+  if (options?.glossary && options.pages) {
+    const withGlossary = ensureGlossaryPage(options.pages);
+    const gp = withGlossary.find((p) => p.id === GLOSSARY_PAGE_ID);
+    if (gp && !gp.locked) {
+      mkdirSync(join(wikiPath, GLOSSARY_PAGE_SECTION), { recursive: true });
+      writeFileSync(
+        join(wikiPath, GLOSSARY_PAGE_SECTION, GLOSSARY_PAGE_FILE),
+        renderGlossaryPage(options.glossary, withGlossary),
+        'utf-8',
+      );
+    }
+    effectivePages = withGlossary;
+  }
+
   try {
     result.linksSanitized = sanitizeLinks(wikiPath);
     logger.info(`[finalize] Sanitized ${result.linksSanitized} file:// links`);
@@ -183,9 +201,9 @@ export async function finalizeWiki(
     logger.error(`[finalize] buildDocIndex failed: ${msg}`);
   }
 
-  if (options?.pages?.length) {
+  if (effectivePages?.length) {
     try {
-      generateSidebar(wikiPath, options.pages);
+      generateSidebar(wikiPath, effectivePages);
       result.sidebarGenerated = true;
       logger.info('[finalize] Generated _sidebar.md');
     } catch (e: unknown) {
@@ -197,7 +215,7 @@ export async function finalizeWiki(
 
   if (options?.audit) {
     try {
-      result.auditReport = analyzeWiki(wikiPath, options.pages, options.factsMap);
+      result.auditReport = analyzeWiki(wikiPath, effectivePages, options.factsMap);
       logger.info(`[finalize] Audit complete: ${result.auditReport.totalDocs} docs analyzed`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

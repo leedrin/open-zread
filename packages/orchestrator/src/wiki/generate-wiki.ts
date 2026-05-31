@@ -480,6 +480,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
       pages,
       audit: true,
       factsMap: factsCollection,
+      glossary,
     });
 
     logger.info(`收尾完成: ${finalizeResult.linksSanitized} 链接修复, 索引=${finalizeResult.docIndexBuilt}, 侧边栏=${finalizeResult.sidebarGenerated}`);
