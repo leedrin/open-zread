@@ -5,8 +5,10 @@
  */
 
 import { FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool } from '@open-zread/agent-sdk';
+import type { WikiPage } from '@open-zread/types';
 import { createAgent } from './agents/create-agent';
 import GenerateCatalog from './prompts/generate-catalog';
+import { buildDeepDivePrompt } from './prompts/deep-dive.js';
 import { GenerateBlueprintTool, ValidateBlueprintTool } from './tools/output-tools.js';
 import { GetCoreSignaturesTool, GetDirectoryTreeTool, GetModuleDetailsTool } from './tools/repo-map-tools.js';
 import type { BlueprintResult, CatalogEvent } from './types.js';
@@ -51,6 +53,19 @@ export async function generateWikiCatalog(
     durationMs: result.durationMs,
     tokenUsage: result.tokenUsage,
   };
+}
+
+/** Run the Catalog Agent scoped to a single topic, producing child sub-pages (writes wiki.json). */
+export async function generateDeepDiveCatalog(
+  topic: WikiPage,
+  onEvent?: (event: CatalogEvent) => void
+): Promise<BlueprintResult> {
+  const result = await createAgent({
+    tools: BLUEPRINT_TOOLS,
+    prompts: buildDeepDivePrompt(topic.title, topic.associatedFiles ?? []),
+    onEvent,
+  });
+  return { pagesCount: 0, durationMs: result.durationMs, tokenUsage: result.tokenUsage };
 }
 
 // Re-export types

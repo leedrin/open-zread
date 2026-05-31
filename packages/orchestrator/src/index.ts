@@ -18,5 +18,9 @@ export * from './types.js'
 export { generateCatalogProposal, persistMergedCatalog } from './wiki/reconcile.js';
 export type { CatalogProposal } from './wiki/reconcile.js';
 
+// Phase C: Deep-Dive
+export { generateDeepDiveProposal } from './wiki/reconcile.js';
+export { generateDeepDiveCatalog } from './orchestrator.js';
+
 // Re-export TokenUsage from agent-sdk
 export type { TokenUsage } from '@open-zread/agent-sdk'
