@@ -14,6 +14,9 @@ export type WikiLevel = 'Beginner' | 'Intermediate' | 'Advanced';
 
 export type DocType = 'tutorial' | 'howto' | 'reference' | 'explanation';
 
+export type PageOrigin = 'ai' | 'human';
+export type PageStatus = 'active' | 'tombstone';
+
 /**
  * WikiPage - Wiki page definition
  */
@@ -36,6 +39,18 @@ export interface WikiPage {
    */
   associatedFiles?: string[];
   docType?: DocType;
+  /** Stable identity, independent of title/slug. Backfilled on load by migrateCatalog. Merge key. */
+  id?: string;
+  /** Who created this page. */
+  origin?: PageOrigin;
+  /** Hard protection: locked pages are never touched by AI operations. */
+  locked?: boolean;
+  /** Soft-delete state. Tombstoned pages stay in wiki.json but are excluded from derived artifacts. */
+  status?: PageStatus;
+  /** Depth directive for content generation. */
+  depth?: 'standard' | 'deep';
+  /** Canonical glossary terms this page is the authoritative home for (page -> many terms). */
+  concepts?: string[];
 }
 
 /**
@@ -71,4 +86,21 @@ export interface TechStackSummary {
   };
   projectType: string;
   entryPoints: string[];
+}
+
+/** A named, themed selection of pages (references by id, never copies content). */
+export interface TopicScope {
+  name: string;
+  description?: string;
+  pageIds: string[];
+  createdAt: string;
+}
+
+/** Result of a 3-way catalog merge (filled in Phase B). */
+export interface CatalogMergePlan {
+  adds: WikiPage[];
+  updates: Array<{ id: string; from: WikiPage; to: WikiPage }>;
+  conflicts: Array<{ id: string; local: WikiPage; remote: WikiPage }>;
+  removes: WikiPage[];
+  kept: WikiPage[];
 }
