@@ -82,4 +82,20 @@ describe('computeMergePlan matrix', () => {
     expect(plan.updates.map((u) => u.id)).toEqual(['a']);
     expect(plan.updates[0].to.title).toBe('技能与战斗');
   });
+
+  test('id-less remote new page is added (not dropped)', () => {
+    const plan = computeMergePlan({ base: [], local: [], remote: [page({ id: undefined, slug: 'fresh', title: 'Fresh' })] });
+    expect(plan.adds).toHaveLength(1);
+    expect(plan.adds[0].title).toBe('Fresh');
+    expect(plan.adds[0].id).toBeTruthy();
+  });
+
+  test('two remote pages sharing an id are both preserved (no silent drop)', () => {
+    const plan = computeMergePlan({
+      base: [], local: [],
+      remote: [page({ id: 'dup', slug: 'a', title: 'First' }), page({ id: 'dup', slug: 'b', title: 'Second' })],
+    });
+    expect(plan.adds).toHaveLength(2);
+    expect(plan.adds.map((p) => p.title).sort()).toEqual(['First', 'Second']);
+  });
 });

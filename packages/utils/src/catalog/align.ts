@@ -24,14 +24,16 @@ export function pageContentEqual(a: WikiPage, b: WikiPage): boolean {
     a.level === b.level &&
     (a.docType ?? '') === (b.docType ?? '') &&
     (a.depth ?? '') === (b.depth ?? '') &&
-    arrEq(a.associatedFiles ?? [], b.associatedFiles ?? []) &&
-    arrEq(a.concepts ?? [], b.concepts ?? [])
+    setEq(a.associatedFiles ?? [], b.associatedFiles ?? []) &&
+    setEq(a.concepts ?? [], b.concepts ?? [])
   );
 }
 
-function arrEq(a: string[], b: string[]): boolean {
+function setEq(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  for (let i = 0; i < sa.length; i++) if (sa[i] !== sb[i]) return false;
   return true;
 }
 

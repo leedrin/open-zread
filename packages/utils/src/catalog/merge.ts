@@ -1,10 +1,27 @@
 import type { WikiPage, CatalogMergePlan } from '@open-zread/types';
 import { alignRemote, pageContentEqual } from './align.js';
+import { deriveId } from './migrate.js';
 
 export interface MergeInput {
   base: WikiPage[];
   local: WikiPage[];
   remote: WikiPage[];
+}
+
+/**
+ * Ensure every page has a unique, non-empty id. Id-less pages get deriveId(slug);
+ * within-list duplicates are disambiguated to a fresh id. Prevents silent page loss
+ * when building the id-keyed map. Applied to the aligned REMOTE list only — BASE and
+ * LOCAL ids are authoritative (alignment already ran against LOCAL's original ids).
+ */
+function ensureUniqueIds(pages: WikiPage[]): WikiPage[] {
+  const seen = new Set<string>();
+  return pages.map((p, i) => {
+    let id = p.id && p.id.length > 0 ? p.id : deriveId(p.slug);
+    while (seen.has(id)) id = deriveId(`${p.slug}-${i}-${id}`);
+    seen.add(id);
+    return id === p.id ? p : { ...p, id };
+  });
 }
 
 /**
@@ -17,7 +34,7 @@ export interface MergeInput {
  * (kept, never re-added).
  */
 export function computeMergePlan(input: MergeInput): CatalogMergePlan {
-  const aligned = alignRemote(input.remote, input.local);
+  const aligned = ensureUniqueIds(alignRemote(input.remote, input.local));
   const base = byId(input.base);
   const local = byId(input.local);
   const remote = byId(aligned);

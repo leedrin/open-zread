@@ -26,6 +26,12 @@ describe('pageContentEqual', () => {
   test('different associatedFiles = false', () => {
     expect(pageContentEqual(page({ associatedFiles: ['a'] }), page({ associatedFiles: ['b'] }))).toBe(false);
   });
+  test('associatedFiles order does not matter', () => {
+    expect(pageContentEqual(page({ associatedFiles: ['x.ts', 'y.ts'] }), page({ associatedFiles: ['y.ts', 'x.ts'] }))).toBe(true);
+  });
+  test('concepts order does not matter', () => {
+    expect(pageContentEqual(page({ concepts: ['A', 'B'] }), page({ concepts: ['B', 'A'] }))).toBe(true);
+  });
 });
 
 describe('alignRemote', () => {
