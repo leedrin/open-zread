@@ -32,11 +32,11 @@
 
 ### B1. Merge Engine (pure, testable)
 
-- [ ] B1.1 `loadBaseFromSnapshot()` — read `wiki.json` from the latest `versions/<...>/`; fall back to current catalog when no snapshot
-- [ ] B1.2 `alignNodes(base, local, remote)` — priority: exact id → **concept-set match (concepts overlap, primary channel)** → associatedFiles fingerprint fallback → else new page
-- [ ] B1.3 `computeMergePlan(base, local, remote)` — classify ADD / KEEP / APPLY / CONFLICT / RESPECT-DELETE / REMOVE per the matrix
-- [ ] B1.4 Enforce hard lock: locked pages preserved verbatim, REMOTE changes for them discarded, excluded from generation
-- [ ] B1.5 Unit tests for each matrix row + lock protection + fingerprint alignment of a renamed page
+- [x] B1.1 `loadBaseFromSnapshot()` — read `wiki.json` from the latest `versions/<...>/`; fall back to current catalog when no snapshot
+- [x] B1.2 `alignNodes(base, local, remote)` — priority: exact id → **concept-set match (concepts overlap, primary channel)** → associatedFiles fingerprint fallback → else new page
+- [x] B1.3 `computeMergePlan(base, local, remote)` — classify ADD / KEEP / APPLY / CONFLICT / RESPECT-DELETE / REMOVE per the matrix
+- [x] B1.4 Enforce hard lock: locked pages preserved verbatim, REMOTE changes for them discarded, excluded from generation
+- [x] B1.5 Unit tests for each matrix row + lock protection + fingerprint alignment of a renamed page
 
 ### B2. Regenerate-as-Proposal Flow
 
