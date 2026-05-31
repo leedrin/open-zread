@@ -132,6 +132,15 @@ export const zhCN: TranslationKeys = {
     dividerHasCatalog: '目录已生成',
     dividerInProgress: '文档生成中 ({generated}/{total})',
     dividerComplete: '文档已生成 ({total} 篇)',
+    catalogEditor: '目录编辑器',
+  },
+  catalogEditor: {
+    title: '目录编辑器',
+    saving: '保存中…',
+    saved: '已保存 ✓',
+    failed: '保存失败',
+    hintBrowse: 'a 新增 | r 重命名 | m 移动 | l 锁定 | x 删除 | u 恢复 | p 深度 | s 保存 | ESC 返回',
+    hintEdit: '输入后回车确认 | ESC 取消',
   },
   browse: {
     title: 'Zread — Wiki 文档浏览',

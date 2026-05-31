@@ -10,6 +10,7 @@ import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import { useWiki } from '../../provider';
+import { useI18n } from '../../i18n';
 import {
   migrateCatalog,
   buildCatalogTree,
@@ -25,6 +26,7 @@ import Divider from '../../components/Divider';
 import { persistCatalog } from './persist.js';
 
 export default function CatalogEditorPage() {
+  const { t } = useI18n();
   const { wikiCatalog, reload } = useWiki();
 
   const [pages, setPages] = useState<WikiPage[]>(() =>
@@ -117,7 +119,7 @@ export default function CatalogEditorPage() {
   if (pages.length === 0) {
     return (
       <Box flexDirection="column">
-        <Divider title="目录编辑器" />
+        <Divider title={t('catalogEditor.title')} />
         <Box marginTop={1}>
           <Text dimColor>暂无目录</Text>
         </Box>
@@ -127,14 +129,14 @@ export default function CatalogEditorPage() {
 
   return (
     <Box flexDirection="column">
-      <Divider title="目录编辑器" />
+      <Divider title={t('catalogEditor.title')} />
 
       {/* Save status / dirty indicator */}
       {(status !== 'idle' || dirty) && (
         <Box marginTop={1}>
-          {status === 'saving' && <Text color="yellow">保存中…</Text>}
-          {status === 'saved' && <Text color="green">已保存 ✓</Text>}
-          {status === 'failed' && <Text color="red">保存失败</Text>}
+          {status === 'saving' && <Text color="yellow">{t('catalogEditor.saving')}</Text>}
+          {status === 'saved' && <Text color="green">{t('catalogEditor.saved')}</Text>}
+          {status === 'failed' && <Text color="red">{t('catalogEditor.failed')}</Text>}
           {status === 'idle' && dirty && <Text color="yellow">* 未保存更改</Text>}
         </Box>
       )}
@@ -280,9 +282,9 @@ export default function CatalogEditorPage() {
       {/* Footer */}
       <Box marginTop={1}>
         {mode === 'browse' ? (
-          <Text dimColor>↑/↓ 导航 | a 新增 | r 重命名 | m 移动 | l 锁定 | x 删除 | u 恢复 | p 深度 | s 保存 | ESC 返回</Text>
+          <Text dimColor>{t('catalogEditor.hintBrowse')}</Text>
         ) : (
-          <Text dimColor>输入后回车确认</Text>
+          <Text dimColor>{t('catalogEditor.hintEdit')}</Text>
         )}
       </Box>
     </Box>

@@ -132,6 +132,15 @@ export const enUS: TranslationKeys = {
     dividerHasCatalog: 'Catalog generated',
     dividerInProgress: 'Generating ({generated}/{total})',
     dividerComplete: 'Docs generated ({total} pages)',
+    catalogEditor: 'Catalog Editor',
+  },
+  catalogEditor: {
+    title: 'Catalog Editor',
+    saving: 'Saving…',
+    saved: 'Saved ✓',
+    failed: 'Save failed',
+    hintBrowse: 'a Add | r Rename | m Move | l Lock | x Delete | u Restore | p Depth | s Save | ESC Back',
+    hintEdit: 'Enter to confirm | ESC to cancel',
   },
   browse: {
     title: 'Zread — Wiki Browser',

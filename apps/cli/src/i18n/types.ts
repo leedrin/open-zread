@@ -134,6 +134,15 @@ export interface TranslationKeys {
     dividerHasCatalog: string;
     dividerInProgress: string;
     dividerComplete: string;
+    catalogEditor: string;
+  };
+  catalogEditor: {
+    title: string;
+    saving: string;
+    saved: string;
+    failed: string;
+    hintBrowse: string;
+    hintEdit: string;
   };
   wikiGenerate: {
     catalogTitle: string;

@@ -72,6 +72,8 @@ function buildNormalSelectItems(
     items.push({ label: t('wiki.browse'), value: 'browse' });
     // 4.5 增量更新（文档已完成时显示，diff 源码仅重生受影响页面）
     items.push({ label: t('wiki.incremental'), value: 'incremental' });
+    // 4.6 目录编辑器（文档已完成时显示）
+    items.push({ label: t('wiki.catalogEditor'), value: 'catalog-editor' });
   }
 
   // 5. 强制重新生成（wiki.json 存在）
@@ -130,6 +132,9 @@ export default function WikiHomePage() {
         break;
       case 'incremental':
         navigate('/wiki/generate?mode=incremental');
+        break;
+      case 'catalog-editor':
+        navigate('/wiki/catalog-editor');
         break;
       case 'config':
         navigate('/config');

@@ -15,11 +15,11 @@
 
 ### A3. TUI Catalog Editor
 
-- [ ] A3.1 New Ink view: catalog tree (section → group → page) with keyboard navigation
-- [ ] A3.2 Wire add / rename / move / delete (soft) / lock toggle / depth set to the node ops
-- [ ] A3.3 Save: write `wiki.json` + re-run finalize
-- [ ] A3.4 Add wiki-home menu entry + i18n (zh-CN / en-US / types.ts)
-- [ ] A3.5 Run `bun run typecheck` and `bun run lint`
+- [x] A3.1 New Ink view: catalog tree (section → group → page) with keyboard navigation
+- [x] A3.2 Wire add / rename / move / delete (soft) / lock toggle / depth set to the node ops
+- [x] A3.3 Save: write `wiki.json` + re-run finalize
+- [x] A3.4 Add wiki-home menu entry + i18n (zh-CN / en-US / types.ts)
+- [x] A3.5 Run `bun run typecheck` and `bun run lint`
 
 ### A4. Glossary Page (deterministic render)
 
