@@ -4,7 +4,7 @@
 
 import type { ToolDefinition, ToolInputParams, ToolContext, ToolResult } from '@open-zread/agent-sdk'
 import { generateWikiJson, loadConfig } from '@open-zread/utils'
-import type { WikiPage } from '@open-zread/types'
+import type { WikiPage, GlossaryTerm } from '@open-zread/types'
 import type { TechStackSummary } from '../types.js'
 
 /**
@@ -46,6 +46,20 @@ export const GenerateBlueprintTool: ToolDefinition = {
       coreModules: {
         type: 'object',
         description: '核心模块信息（可选）'
+      },
+      glossary: {
+        type: 'array',
+        description: '项目术语表（可选）：核心概念的标准命名、别名和定义',
+        items: {
+          type: 'object',
+          properties: {
+            term: { type: 'string', description: '规范名称' },
+            aliases: { type: 'array', items: { type: 'string' }, description: '别名/旧称' },
+            definition: { type: 'string', description: '一句话定义' },
+            canonicalPage: { type: 'string', description: '权威页面 slug' }
+          },
+          required: ['term', 'definition']
+        }
       }
     },
     required: ['pages']
@@ -60,6 +74,7 @@ export const GenerateBlueprintTool: ToolDefinition = {
     try {
       const pages = input.pages as unknown as WikiPage[]
       const techStackSummary = input.techStackSummary as unknown as TechStackSummary | undefined
+      const glossary = input.glossary as unknown as GlossaryTerm[] | undefined
 
       // Load config to get language setting
       const config = await loadConfig()
@@ -75,7 +90,7 @@ export const GenerateBlueprintTool: ToolDefinition = {
       }
 
       // Generate and save wiki.json
-      const outputPath = await generateWikiJson(pages, config, techStackSummary)
+      const outputPath = await generateWikiJson(pages, config, techStackSummary, glossary)
 
       // Build result summary
       const groups = [...new Set(pages.map(p => p.group).filter(Boolean))]
@@ -89,7 +104,8 @@ export const GenerateBlueprintTool: ToolDefinition = {
           intermediate: pages.filter(p => p.level === 'Intermediate').length,
           advanced: pages.filter(p => p.level === 'Advanced').length
         },
-        hasAssociatedFiles: pages.filter(p => p.associatedFiles && p.associatedFiles.length > 0).length
+        hasAssociatedFiles: pages.filter(p => p.associatedFiles && p.associatedFiles.length > 0).length,
+        glossaryCount: glossary?.length ?? 0
       }
 
       return {

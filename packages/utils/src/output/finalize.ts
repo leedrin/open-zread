@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, extname, relative } from 'node:path';
-import type { WikiPage } from '@open-zread/types';
+import type { WikiPage, PageFacts } from '@open-zread/types';
 import { logger } from '../logger.js';
 import { analyzeWiki } from './quality-audit.js';
 import type { QualityReport } from './quality-audit.js';
@@ -8,6 +8,7 @@ import type { QualityReport } from './quality-audit.js';
 export interface FinalizeOptions {
   audit?: boolean;
   pages?: WikiPage[];
+  factsMap?: Map<string, PageFacts>;
 }
 
 export interface FinalizeResult {
@@ -181,7 +182,7 @@ export async function finalizeWiki(
 
   if (options?.audit) {
     try {
-      result.auditReport = analyzeWiki(wikiPath, options.pages);
+      result.auditReport = analyzeWiki(wikiPath, options.pages, options.factsMap);
       logger.info(`[finalize] Audit complete: ${result.auditReport.totalDocs} docs analyzed`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

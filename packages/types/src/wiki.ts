@@ -44,6 +44,17 @@ export interface WikiOutput {
   language: string;
   pages: WikiPage[];
   techStackSummary?: TechStackSummary;
+  glossary?: GlossaryTerm[];
+}
+
+/**
+ * GlossaryTerm - Canonical term for cross-page naming consistency
+ */
+export interface GlossaryTerm {
+  term: string;
+  aliases?: string[];
+  definition: string;
+  canonicalPage?: string;
 }
 
 /**

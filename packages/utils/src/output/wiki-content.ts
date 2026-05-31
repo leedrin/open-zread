@@ -6,7 +6,7 @@
 
 import { readFile } from 'fs/promises';
 import { join } from 'path';
-import type { WikiOutput, WikiPage, AppConfig, TechStackSummary } from '@open-zread/types';
+import type { WikiOutput, WikiPage, AppConfig, TechStackSummary, GlossaryTerm } from '@open-zread/types';
 import { getWikiDir, getWikiJsonPath, writeJsonFile } from '../file-io.js';
 import { logger } from '../logger.js';
 
@@ -27,7 +27,8 @@ function generateWikiId(): string {
 export async function generateWikiJson(
   pages: WikiPage[],
   config: AppConfig,
-  techStackSummary?: TechStackSummary
+  techStackSummary?: TechStackSummary,
+  glossary?: GlossaryTerm[],
 ): Promise<string> {
   const wikiOutput: WikiOutput = {
     id: generateWikiId(),
@@ -35,6 +36,7 @@ export async function generateWikiJson(
     language: config.doc_language,
     pages,
     techStackSummary,
+    glossary,
   };
 
   const outputPath = getWikiJsonPath();

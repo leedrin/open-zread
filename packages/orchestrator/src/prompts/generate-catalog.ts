@@ -38,7 +38,26 @@ export default `你是一个顶级的软件架构师和领域驱动设计（DDD�
 - **要求**：单篇文章的 associatedFiles 建议保持在 1 到 4 个目录或核心文件路径之间。如果某项功能高度浓缩在某几个特定文件中，associatedFiles 必须精确到具体文件（例如 packages/core/src/scheduler.ts 或 src/net/tcp_pool.go），绝对不允许粗暴地将其父目录整体打包混入！
 
 ### Step 4: 生成并验证蓝图
-调用 \`generate_blueprint\` 生成 wiki.json，并用 \`validate_blueprint\` 验证。
+调用 \`generate_blueprint\` 生成 wiki.json（含 pages 和 glossary），并用 \`validate_blueprint\` 验证。
+
+### Step 5: 产出项目术语表（Glossary）
+在调用 \`generate_blueprint\` 时，除了 \`pages\`，你还**必须**同时产出 \`glossary\`（项目术语表）。
+
+**术语表要求**：
+- 识别项目中的核心领域概念（通常 10-30 个）
+- 每个术语包含：\`term\`（规范名称）、\`aliases\`（别名/旧称）、\`definition\`（一句话定义）、\`canonicalPage\`（该概念的权威页面 slug）
+- 术语来源：核心模块名、关键抽象、设计模式、数据结构、核心算法
+- 目的：确保所有 Page Agent 使用统一命名，消除跨页术语漂移
+
+**示例**：
+\`\`\`json
+{
+  "term": "Repo Map",
+  "aliases": ["代码库地图", "项目骨架"],
+  "definition": "三层递进式代码库摘要，从目录拓扑到核心签名再到模块详情",
+  "canonicalPage": "3-core-architecture"
+}
+\`\`\`
 
 ---
 
@@ -115,6 +134,20 @@ export default `你是一个顶级的软件架构师和领域驱动设计（DDD�
       "associatedFiles":[
         "packages/cli/src/"
       ]
+    }
+  ],
+  "glossary":[
+    {
+      "term": "连接池",
+      "aliases": ["Connection Pool", "TCP 池"],
+      "definition": "管理 TCP 连接复用和高并发的核心组件",
+      "canonicalPage": "4-tcp-connection-pool"
+    },
+    {
+      "term": "基数树路由",
+      "aliases": ["Radix Tree Router"],
+      "definition": "基于基数树数据结构的高性能 HTTP 路由解析引擎",
+      "canonicalPage": "5-http-router-parser"
     }
   ]
 }

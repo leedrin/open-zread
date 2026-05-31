@@ -48,6 +48,7 @@ export type { SecretLeak } from './output/audit-docs.js';
 export {
   analyzeDoc,
   analyzeWiki,
+  analyzeFactsCoverage,
   scoreByComplexity,
 } from './output/quality-audit.js';
 export type {
@@ -56,6 +57,7 @@ export type {
   QualityLevel,
   QualityReport,
   MermaidIssue as AuditMermaidIssue,
+  FactsCoverageResult,
 } from './output/quality-audit.js';
 
 export {

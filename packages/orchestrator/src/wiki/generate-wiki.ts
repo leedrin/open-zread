@@ -17,9 +17,13 @@ import { FileEditTool, FileReadTool, GlobTool, GrepTool } from '@open-zread/agen
 import { WritePageTool, ReadPageTool } from '../tools/page-tools.js';
 import PageAgentPrompt from '../prompts/page-agent';
 import { buildSurgicalEditPrompt } from '../prompts/surgical-edit.js';
+import { buildRegeneratePrompt } from '../prompts/regenerate-with-feedback.js';
+import ArchitectPagePrompt from '../prompts/architect-page.js';
+import ReviewerPagePrompt from '../prompts/reviewer-page.js';
 import { extractPageFacts } from '@open-zread/repo-analyzer';
-import type { WikiPage, PageFacts, AffectedDoc } from '@open-zread/types';
+import type { WikiPage, PageFacts, AffectedDoc, GlossaryTerm } from '@open-zread/types';
 import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './types.js';
+import type { CatalogEvent } from '../types.js';
 import { resolve } from 'path';
 
 interface QualityTargets {
@@ -55,13 +59,33 @@ function formatDoc(doc: string): string {
   return lines.join('\n              ');
 }
 
+function buildGlossarySection(glossary: GlossaryTerm[]): string {
+  if (!glossary || glossary.length === 0) return '';
+
+  const lines: string[] = [];
+  lines.push('## 📖 项目术语表（统一命名）');
+  lines.push('');
+  lines.push('以下是项目的核心术语规范。提到这些概念时**必须**使用术语表中的规范名称。');
+  lines.push('');
+  for (const g of glossary) {
+    const aliases = g.aliases && g.aliases.length > 0 ? `（别名：${g.aliases.join('、')}）` : '';
+    lines.push(`- **${g.term}**${aliases}：${g.definition}`);
+  }
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+  return lines.join('\n');
+}
+
 /**
  * Build page-specific prompt
  */
-function buildPagePrompt(page: WikiPage, facts?: PageFacts): string {
+export function buildPagePrompt(page: WikiPage, facts?: PageFacts, glossary?: GlossaryTerm[]): string {
   const associatedFilesList = page.associatedFiles?.map(f => `- ${f}`).join('\n') || '（无关联路径）';
 
   const targets = getQualityTargets(page);
+
+  const glossarySection = buildGlossarySection(glossary ?? []);
 
   const factsSection = facts && facts.exports.length > 0
     ? `
@@ -90,7 +114,7 @@ ${facts.fileSummaries.map(f => `- ${f.file} (${f.symbolCount} 个符号, 导出:
     : '';
 
   return `${PageAgentPrompt}
-${factsSection}
+${glossarySection}${factsSection}
 ---
 
 ## 🎯 本文档质量目标
@@ -133,6 +157,134 @@ ${associatedFilesList}
 请按照三步工作流执行，最后使用 write_page 输出文档（务必传入完整的 file 和 section 参数）。`;
 }
 
+function buildAgentEventHandler(
+  options: GenerateWikiOptions | undefined,
+  page: WikiPage,
+) {
+  return (catalogEvent: CatalogEvent) => {
+    let articleEventType: ArticleEventPayload['type'];
+    let toolName: string | undefined;
+
+    switch (catalogEvent.type) {
+      case 'requesting':
+        articleEventType = 'requesting';
+        break;
+      case 'responding':
+        articleEventType = 'responding';
+        break;
+      case 'tool_start':
+        articleEventType = 'tool_start';
+        toolName = catalogEvent.toolName;
+        break;
+      case 'tool_result':
+        articleEventType = 'tool_result';
+        break;
+      case 'retry':
+        options?.onEvent?.({
+          type: 'retry',
+          slug: page.slug,
+          usage: catalogEvent.usage,
+          retryCount: catalogEvent.retryCount,
+          maxRetries: catalogEvent.maxRetries,
+          delayMs: catalogEvent.delayMs,
+          error: catalogEvent.error,
+        });
+        return;
+      case 'error':
+        return;
+      case 'complete':
+        return;
+      default:
+        return;
+    }
+
+    options?.onEvent?.({
+      type: articleEventType,
+      slug: page.slug,
+      usage: catalogEvent.usage,
+      toolName,
+    });
+  };
+}
+
+async function generatePageDualPass(
+  page: WikiPage,
+  facts: PageFacts | undefined,
+  glossary: GlossaryTerm[] | undefined,
+  options: GenerateWikiOptions | undefined,
+  progress: ProgressState,
+  pageStartTime: number,
+): Promise<PageResult> {
+  const architectPrompt = `${ArchitectPagePrompt}\n\n${buildPagePrompt(page, facts, glossary)}`;
+
+  await createAgent({
+    tools: [FileReadTool, FileEditTool, GlobTool, GrepTool, WritePageTool],
+    prompts: architectPrompt,
+    maxTurns: 30,
+    onEvent: buildAgentEventHandler(options, page),
+  });
+
+  const reviewerPrompt = `${ReviewerPagePrompt}\n\n${buildPagePrompt(page, facts, glossary)}`;
+
+  const result = await createAgent({
+    tools: [FileReadTool, GlobTool, GrepTool, ReadPageTool, WritePageTool],
+    prompts: reviewerPrompt,
+    maxTurns: 20,
+    onEvent: buildAgentEventHandler(options, page),
+  });
+
+  progress.completed++;
+  const pageResult: PageResult = {
+    slug: page.slug,
+    success: true,
+    outputPath: `.open-zread/wiki/${page.section}/${page.file}`,
+    durationMs: Math.round(performance.now() - pageStartTime),
+    tokenUsage: result.tokenUsage,
+  };
+  progress.results.push(pageResult);
+  options?.onProgress?.(progress);
+
+  options?.onEvent?.({
+    type: 'page_complete',
+    slug: page.slug,
+    outputPath: pageResult.outputPath,
+    durationMs: pageResult.durationMs,
+    usage: result.tokenUsage,
+  });
+
+  logger.success(`[${page.slug}] 双轮完成 (${pageResult.durationMs}ms)`);
+
+  return pageResult;
+}
+
+function getEligibleRegenPages(
+  auditReport: import('@open-zread/utils').QualityReport,
+  pages: WikiPage[],
+  regenThreshold: number,
+): WikiPage[] {
+  const eligible: WikiPage[] = [];
+
+  for (const doc of auditReport.docs) {
+    const rel = doc.filePath.replace(/^.+?[/\\]wiki[/\\]/, '');
+    const page = pages.find(p => p.file === rel);
+    if (!page) continue;
+
+    if (doc.level === 'basic') {
+      eligible.push(page);
+      continue;
+    }
+
+    if (doc.metrics.exportsTotal > 0) {
+      const coverage = doc.metrics.exportsCovered / doc.metrics.exportsTotal;
+      if (coverage < regenThreshold) {
+        eligible.push(page);
+      }
+    }
+  }
+
+  return eligible;
+}
+
 /**
  * Generate Wiki Content
  *
@@ -144,11 +296,12 @@ ${associatedFilesList}
 export async function generateWikiContent(options?: GenerateWikiOptions): Promise<WikiResult> {
   const startTime = performance.now();
 
-  // 并发数由调用方传递（默认 1）
   const maxConcurrent = options?.maxConcurrent ?? 1;
+  const maxRegenRounds = options?.maxRegenRounds ?? 1;
+  const regenThreshold = options?.regenThreshold ?? 0.6;
 
-  // Load blueprint or use provided pages
   let pages: WikiPage[];
+  let glossary: GlossaryTerm[] | undefined;
   let affectedDocsMap: Map<string, AffectedDoc> | undefined;
 
   if (options?.incrementalPlan && options.incrementalPlan.affectedDocs.length > 0) {
@@ -159,17 +312,17 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
     logger.info(`增量模式：${pages.length} 个受影响页面（共 ${options.incrementalPlan.unaffectedDocs.length} 个未受影响）`);
   } else if (options?.pages && options.pages.length > 0) {
     pages = options.pages;
+    glossary = options.glossary;
   } else {
     const blueprint = await loadWikiBlueprint(options?.blueprintPath);
     pages = blueprint.pages;
+    glossary = blueprint.glossary;
   }
 
   logger.info(`开始生成 Wiki 内容：${pages.length} 个页面，并发数 ${maxConcurrent}`);
 
-  // 3. Create concurrency limiter
   const limit = pLimit(maxConcurrent);
 
-  // 4. Initialize progress tracking
   const progress: ProgressState = {
     total: pages.length,
     completed: 0,
@@ -179,15 +332,14 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
     results: [],
   };
 
-  // 5. Parallel page generation using existing createAgent
+  const factsCollection = new Map<string, PageFacts>();
+
   const tasks = pages.map((page) =>
     limit(async () => {
       const pageStartTime = performance.now();
 
-      // 发射 page_start 事件
       options?.onEvent?.({ type: 'page_start', slug: page.slug });
 
-      // Update progress
       progress.currentPage = page;
       progress.pending--;
       options?.onProgress?.(progress);
@@ -197,6 +349,10 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
         const facts = options?.symbols
           ? extractPageFacts(page, options.symbols)
           : undefined;
+
+        if (facts) {
+          factsCollection.set(page.file, facts);
+        }
 
         const affected = affectedDocsMap?.get(page.slug);
         const isIncremental = affected?.updateStrength === 'incremental';
@@ -221,8 +377,10 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
             existingContent,
           });
           agentTools = [FileReadTool, FileEditTool, GlobTool, GrepTool, ReadPageTool, WritePageTool];
+        } else if (page.level === 'Advanced') {
+          return generatePageDualPass(page, facts, glossary, options, progress, pageStartTime);
         } else {
-          prompts = buildPagePrompt(page, facts);
+          prompts = buildPagePrompt(page, facts, glossary);
           agentTools = [FileReadTool, FileEditTool, GlobTool, GrepTool, WritePageTool];
         }
 
@@ -230,56 +388,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           tools: agentTools,
           prompts,
           maxTurns: isIncremental ? 15 : 30,
-          // 通过 onEvent 将 CatalogEvent 转换为 ArticleEventPayload
-          onEvent: (catalogEvent) => {
-            // 将 CatalogEvent 转换为 ArticleEventPayload
-            let articleEventType: ArticleEventPayload['type'];
-            let toolName: string | undefined;
-
-            switch (catalogEvent.type) {
-              case 'requesting':
-                articleEventType = 'requesting';
-                break;
-              case 'responding':
-                articleEventType = 'responding';
-                break;
-              case 'tool_start':
-                articleEventType = 'tool_start';
-                toolName = catalogEvent.toolName;
-                break;
-              case 'tool_result':
-                articleEventType = 'tool_result';
-                break;
-              case 'retry':
-                // 重试事件：传递给 UI 显示重试状态
-                options?.onEvent?.({
-                  type: 'retry',
-                  slug: page.slug,
-                  usage: catalogEvent.usage,
-                  retryCount: catalogEvent.retryCount,
-                  maxRetries: catalogEvent.maxRetries,
-                  delayMs: catalogEvent.delayMs,
-                  error: catalogEvent.error,
-                });
-                return;
-              case 'error':
-                // 错误事件：createAgent 会 throw 异常，由 catch 块处理
-                return;
-              case 'complete':
-                // 完成事件：不在这里发射，由外层处理
-                return;
-              default:
-                // 其他事件类型不发射
-                return;
-            }
-
-            options?.onEvent?.({
-              type: articleEventType,
-              slug: page.slug,
-              usage: catalogEvent.usage,
-              toolName,
-            });
-          },
+          onEvent: buildAgentEventHandler(options, page),
         });
 
         // Success
@@ -294,7 +403,6 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
         progress.results.push(pageResult);
         options?.onProgress?.(progress);
 
-        // 发射 page_complete 事件
         options?.onEvent?.({
           type: 'page_complete',
           slug: page.slug,
@@ -308,9 +416,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
         return pageResult;
 
       } catch (err: unknown) {
-        // Error isolation: single page failure doesn't stop others
         const message = err instanceof Error ? err.message : String(err);
-
 
         progress.failed++;
         const pageResult: PageResult = {
@@ -322,7 +428,6 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
         progress.results.push(pageResult);
         options?.onProgress?.(progress);
 
-        // 发射 page_error 事件
         options?.onEvent?.({
           type: 'page_error',
           slug: page.slug,
@@ -337,16 +442,15 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
     })
   );
 
-  // 6. Wait for all tasks
   await Promise.all(tasks);
 
-  // 7. Finalize: sanitize links, build index, generate sidebar, audit
   let finalizeData: { finalizeResult?: import('@open-zread/utils').FinalizeResult; auditReport?: import('@open-zread/utils').QualityReport } = {};
   try {
     const wikiDir = getWikiDir();
     const finalizeResult = await finalizeWiki(wikiDir, {
       pages,
       audit: true,
+      factsMap: factsCollection,
     });
 
     logger.info(`收尾完成: ${finalizeResult.linksSanitized} 链接修复, 索引=${finalizeResult.docIndexBuilt}, 侧边栏=${finalizeResult.sidebarGenerated}`);
@@ -372,6 +476,74 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
     logger.warn(`收尾管道异常: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  let regeneratedCount = 0;
+
+  if (maxRegenRounds > 0 && finalizeData.auditReport) {
+    const currentAudit = finalizeData.auditReport;
+    for (let round = 0; round < maxRegenRounds; round++) {
+      const eligiblePages = getEligibleRegenPages(currentAudit, pages, regenThreshold);
+      if (eligiblePages.length === 0) {
+        logger.info(`重生环 round ${round + 1}: 无待重生页面，提前结束`);
+        break;
+      }
+
+      logger.info(`重生环 round ${round + 1}: ${eligiblePages.length} 个待重生页面`);
+
+      const regenTasks = eligiblePages.map(page =>
+        limit(async () => {
+          const facts = factsCollection.get(page.file);
+          const docQuality = currentAudit.docs.find(d => {
+            const rel = d.filePath.replace(/^.+?[/\\]wiki[/\\]/, '');
+            return rel === page.file;
+          });
+          const metrics = docQuality?.metrics;
+
+          const prompts = metrics
+            ? buildRegeneratePrompt(page, metrics, facts)
+            : buildPagePrompt(page, facts, glossary);
+
+          try {
+            const result = await createAgent({
+              tools: [FileReadTool, FileEditTool, GlobTool, GrepTool, WritePageTool],
+              prompts,
+              maxTurns: 30,
+              onEvent: buildAgentEventHandler(options, page),
+            });
+
+            regeneratedCount++;
+            logger.success(`[重生] ${page.slug} 完成`);
+            return result;
+          } catch (err) {
+            logger.warn(`[重生] ${page.slug} 失败: ${err instanceof Error ? err.message : String(err)}`);
+            return null;
+          }
+        })
+      );
+
+      await Promise.all(regenTasks);
+
+      try {
+        const wikiDir = getWikiDir();
+        const reFinalize = await finalizeWiki(wikiDir, {
+          pages,
+          audit: true,
+          factsMap: factsCollection,
+        });
+        finalizeData.auditReport = reFinalize.auditReport;
+      } catch (err) {
+        logger.warn(`重生后重新审计失败: ${err instanceof Error ? err.message : String(err)}`);
+        break;
+      }
+    }
+  }
+
+  if (regeneratedCount > 0 && finalizeData.auditReport) {
+    const auditReport = finalizeData.auditReport;
+    logger.info(
+      `重生完成: ${regeneratedCount} 页重生, 最终质量 ${auditReport.professionalCount}/${auditReport.totalDocs} professional, ${auditReport.standardCount} standard, ${auditReport.basicCount} basic`
+    );
+  }
+
   const durationMs = Math.round(performance.now() - startTime);
 
   logger.info(
@@ -384,6 +556,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
     failed: progress.failed,
     durationMs,
     results: progress.results,
+    regeneratedCount,
     ...finalizeData,
   };
 }

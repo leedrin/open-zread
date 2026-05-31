@@ -4,7 +4,7 @@
  * Types for Wiki content generation system.
  */
 
-import type { WikiPage, SymbolManifest, IncrementalPlan } from '@open-zread/types';
+import type { WikiPage, SymbolManifest, IncrementalPlan, GlossaryTerm } from '@open-zread/types';
 import type { TokenUsage } from '@open-zread/agent-sdk';
 import type { FinalizeResult, QualityReport } from '@open-zread/utils';
 
@@ -56,20 +56,14 @@ export interface PageResult {
  * Final result of Wiki content generation.
  */
 export interface WikiResult {
-  /** Total pages */
   total: number;
-  /** Successfully generated pages */
   completed: number;
-  /** Failed pages */
   failed: number;
-  /** Total duration in milliseconds */
   durationMs: number;
-  /** Individual page results */
   results: PageResult[];
-  /** Finalize pipeline result (if finalize ran) */
   finalizeResult?: FinalizeResult;
-  /** Quality audit report (if audit ran) */
   auditReport?: QualityReport;
+  regeneratedCount?: number;
 }
 
 // ==================== 细粒度事件（实时回调） ====================
@@ -118,18 +112,14 @@ export interface ArticleEventPayload {
  * Generate Wiki Content Options
  */
 export interface GenerateWikiOptions {
-  /** Blueprint file path (default: .open-zread/wiki/wiki.json) */
   blueprintPath?: string;
-  /** 待生成的页面列表（如果传入，则不从 blueprint 加载，只生成这些页面） */
   pages?: WikiPage[];
-  /** Custom concurrency limit (overrides config) */
   maxConcurrent?: number;
-  /** 细粒度事件回调（实时） */
   onEvent?: (event: ArticleEventPayload) => void;
-  /** Progress callback for CLI display (batch) */
   onProgress?: (state: ProgressState) => void;
-  /** Symbol manifest for Facts-First extraction (optional) */
   symbols?: SymbolManifest;
-  /** Incremental update plan (if provided, only affected docs are regenerated) */
   incrementalPlan?: IncrementalPlan;
+  glossary?: GlossaryTerm[];
+  maxRegenRounds?: number;
+  regenThreshold?: number;
 }

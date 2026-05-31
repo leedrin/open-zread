@@ -2,7 +2,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { scanSecrets } from './audit-docs.js';
 import type { SecretLeak } from './audit-docs.js';
-import type { WikiPage } from '@open-zread/types';
+import type { WikiPage, PageFacts } from '@open-zread/types';
 
 export interface MermaidIssue {
   severity: 'warn' | 'error';
@@ -24,6 +24,9 @@ export interface DocMetrics {
   emptySections: string[];
   secretLeaks: SecretLeak[];
   mermaidIssues: MermaidIssue[];
+  exportsTotal: number;
+  exportsCovered: number;
+  uncoveredExports: string[];
 }
 
 export interface DocQuality {
@@ -45,6 +48,8 @@ export interface QualityReport {
     totalSourceLinks: number;
     totalSecretLeaks: number;
     totalMermaidIssues: number;
+    totalExports: number;
+    totalExportsCovered: number;
   };
 }
 
@@ -94,6 +99,40 @@ const RESERVED_KEYWORDS = new Set([
   'private',
   'protected',
 ]);
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export interface FactsCoverageResult {
+  exportsTotal: number;
+  exportsCovered: number;
+  uncoveredExports: string[];
+}
+
+export function analyzeFactsCoverage(content: string, facts: PageFacts): FactsCoverageResult {
+  if (!facts.exports || facts.exports.length === 0) {
+    return { exportsTotal: 0, exportsCovered: 0, uncoveredExports: [] };
+  }
+
+  const uncoveredExports: string[] = [];
+  let exportsCovered = 0;
+
+  for (const exp of facts.exports) {
+    const re = new RegExp(`\\b${escapeRegExp(exp.name)}\\b`);
+    if (re.test(content)) {
+      exportsCovered++;
+    } else {
+      uncoveredExports.push(exp.name);
+    }
+  }
+
+  return {
+    exportsTotal: facts.exports.length,
+    exportsCovered,
+    uncoveredExports,
+  };
+}
 
 function collectMdFiles(dir: string): string[] {
   const files: string[] = [];
@@ -229,7 +268,7 @@ function validateMermaidBlock(block: { startLine: number; content: string[] }): 
   return issues;
 }
 
-export function analyzeDoc(filePath: string): DocMetrics {
+export function analyzeDoc(filePath: string, facts?: PageFacts): DocMetrics {
   const content = readFileSync(filePath, 'utf-8');
   const lines = content.split('\n');
 
@@ -296,6 +335,8 @@ export function analyzeDoc(filePath: string): DocMetrics {
     mermaidIssues.push(...validateMermaidBlock(block));
   }
 
+  const coverage = facts ? analyzeFactsCoverage(content, facts) : { exportsTotal: 0, exportsCovered: 0, uncoveredExports: [] };
+
   return {
     filePath,
     lineCount,
@@ -307,6 +348,9 @@ export function analyzeDoc(filePath: string): DocMetrics {
     emptySections,
     secretLeaks,
     mermaidIssues,
+    exportsTotal: coverage.exportsTotal,
+    exportsCovered: coverage.exportsCovered,
+    uncoveredExports: coverage.uncoveredExports,
   };
 }
 
@@ -360,7 +404,19 @@ export function scoreByComplexity(
     lengthScore = 2;
   }
 
-  const totalScore = diagramScore + codeBlockScore + sourceLinkScore + securityScore + mermaidScore + lengthScore;
+  let coverageScore = 3;
+  if (metrics.exportsTotal > 0) {
+    const coverageRatio = metrics.exportsCovered / metrics.exportsTotal;
+    if (coverageRatio >= 0.8) {
+      coverageScore = 3;
+    } else if (coverageRatio >= 0.6) {
+      coverageScore = 2;
+    } else {
+      coverageScore = 1;
+    }
+  }
+
+  const totalScore = diagramScore + codeBlockScore + sourceLinkScore + securityScore + mermaidScore + lengthScore + coverageScore;
 
   let level: QualityLevel;
 
@@ -370,26 +426,26 @@ export function scoreByComplexity(
     page?.level === 'Advanced' ||
     associatedFilesCount >= 5
   ) {
-    if (totalScore >= 15) level = 'professional';
-    else if (totalScore >= 10) level = 'standard';
+    if (totalScore >= 17) level = 'professional';
+    else if (totalScore >= 12) level = 'standard';
     else level = 'basic';
   } else if (
     page?.level === 'Beginner' &&
     associatedFilesCount <= 2
   ) {
-    if (totalScore >= 7) level = 'professional';
-    else if (totalScore >= 5) level = 'standard';
+    if (totalScore >= 8) level = 'professional';
+    else if (totalScore >= 6) level = 'standard';
     else level = 'basic';
   } else {
-    if (totalScore >= 12) level = 'professional';
-    else if (totalScore >= 8) level = 'standard';
+    if (totalScore >= 14) level = 'professional';
+    else if (totalScore >= 9) level = 'standard';
     else level = 'basic';
   }
 
   return { level, score: totalScore };
 }
 
-export function analyzeWiki(wikiPath: string, pages?: WikiPage[]): QualityReport {
+export function analyzeWiki(wikiPath: string, pages?: WikiPage[], factsMap?: Map<string, PageFacts>): QualityReport {
   if (!existsSync(wikiPath)) {
     return {
       totalDocs: 0,
@@ -403,6 +459,8 @@ export function analyzeWiki(wikiPath: string, pages?: WikiPage[]): QualityReport
         totalSourceLinks: 0,
         totalSecretLeaks: 0,
         totalMermaidIssues: 0,
+        totalExports: 0,
+        totalExportsCovered: 0,
       },
     };
   }
@@ -425,12 +483,15 @@ export function analyzeWiki(wikiPath: string, pages?: WikiPage[]): QualityReport
   let totalSourceLinks = 0;
   let totalSecretLeaks = 0;
   let totalMermaidIssues = 0;
+  let totalExports = 0;
+  let totalExportsCovered = 0;
 
   for (const filePath of mdFiles) {
     try {
-      const metrics = analyzeDoc(filePath);
       const relativeFile = filePath.replace(wikiPath + '/', '').replace(wikiPath + '\\', '');
       const page = pageMap.get(relativeFile);
+      const facts = factsMap?.get(relativeFile);
+      const metrics = analyzeDoc(filePath, facts);
       const { level, score } = scoreByComplexity(metrics, page);
 
       docs.push({ filePath, metrics, level, score });
@@ -444,6 +505,8 @@ export function analyzeWiki(wikiPath: string, pages?: WikiPage[]): QualityReport
       totalSourceLinks += metrics.sourceLinkCount;
       totalSecretLeaks += metrics.secretLeaks.length;
       totalMermaidIssues += metrics.mermaidIssues.length;
+      totalExports += metrics.exportsTotal;
+      totalExportsCovered += metrics.exportsCovered;
     } catch {
       // skip unreadable files
     }
@@ -461,6 +524,8 @@ export function analyzeWiki(wikiPath: string, pages?: WikiPage[]): QualityReport
       totalSourceLinks,
       totalSecretLeaks,
       totalMermaidIssues,
+      totalExports,
+      totalExportsCovered,
     },
   };
 }
