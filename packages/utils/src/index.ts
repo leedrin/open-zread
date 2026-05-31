@@ -40,6 +40,9 @@ export {
 // Storage
 export { generateSnapshotName, createVersionSnapshot } from './storage/versioning.js';
 
+// Catalog
+export { deriveId, migrateCatalog } from './catalog/index.js';
+
 // Output
 export { generateWikiJson, loadWikiBlueprint } from './output/wiki-content.js';
 export { scanSecrets, scanWikiForSecrets } from './output/audit-docs.js';

@@ -39,7 +39,13 @@ export const GenerateBlueprintTool: ToolDefinition = {
               type: 'string',
               description: '文档类型：tutorial（教程）、howto（操作指南）、reference（API 参考）、explanation（原理解释，默认）',
               enum: ['tutorial', 'howto', 'reference', 'explanation']
-            }
+            },
+            id: { type: 'string', description: '稳定页面 id（可选；缺省由系统生成）' },
+            origin: { type: 'string', description: "来源：'ai' 或 'human'（可选）" },
+            locked: { type: 'boolean', description: '是否锁定保护（可选）' },
+            status: { type: 'string', description: "状态：'active' 或 'tombstone'（可选）" },
+            depth: { type: 'string', description: "深度：'standard' 或 'deep'（可选）" },
+            concepts: { type: 'array', items: { type: 'string' }, description: '该页归属的规范术语（可选）' },
           },
           required: ['slug', 'title', 'file', 'section']
         }

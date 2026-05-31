@@ -9,6 +9,7 @@ import { join } from 'path';
 import type { WikiOutput, WikiPage, AppConfig, TechStackSummary, GlossaryTerm } from '@open-zread/types';
 import { getWikiDir, getWikiJsonPath, writeJsonFile } from '../file-io.js';
 import { logger } from '../logger.js';
+import { migrateCatalog } from '../catalog/migrate.js';
 
 const DEFAULT_BLUEPRINT_FILE = 'wiki.json';
 
@@ -72,7 +73,7 @@ export async function loadWikiBlueprint(path?: string): Promise<WikiOutput> {
       throw new Error('蓝图 pages 数组为空');
     }
 
-    return blueprint;
+    return migrateCatalog(blueprint);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`加载蓝图失败: ${blueprintPath}\n${message}`, { cause: err });
