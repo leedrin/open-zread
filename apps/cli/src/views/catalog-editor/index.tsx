@@ -2,10 +2,13 @@
  * Catalog Editor Page - 目录编辑器
  *
  * 支持键盘导航及节点操作：锁定、删除、恢复、深度切换、保存。
+ * 支持子模式：新增 (a) / 重命名 (r) / 移动 (m)。
  */
 
 import { useState, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
+import TextInput from 'ink-text-input';
+import SelectInput from 'ink-select-input';
 import { useWiki } from '../../provider';
 import {
   migrateCatalog,
@@ -14,6 +17,8 @@ import {
   tombstonePage,
   setDepth,
   updatePage,
+  addPage,
+  movePage,
 } from '@open-zread/utils';
 import type { WikiPage } from '@open-zread/types';
 import Divider from '../../components/Divider';
@@ -35,9 +40,14 @@ export default function CatalogEditorPage() {
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
   const [dirty, setDirty] = useState(false);
 
+  const [mode, setMode] = useState<'browse' | 'add' | 'rename' | 'move'>('browse');
+  const [draft, setDraft] = useState('');
+
   const selected = tree.flat[cursor];
 
   useInput((input, key) => {
+    if (mode !== 'browse') return; // sub-mode inputs handle their own keys
+
     if (key.upArrow || input === 'k') {
       setCursor((c) => Math.max(0, c - 1));
       return;
@@ -82,6 +92,24 @@ export default function CatalogEditorPage() {
           setStatus('failed');
           setTimeout(() => setStatus('idle'), 2500);
         });
+      return;
+    }
+
+    if (input === 'r') {
+      const id = selected?.id;
+      if (!id) return;
+      setDraft(selected.title);
+      setMode('rename');
+      return;
+    }
+    if (input === 'a') {
+      setDraft('');
+      setMode('add');
+      return;
+    }
+    if (input === 'm') {
+      if (!selected?.id) return;
+      setMode('move');
       return;
     }
   });
@@ -178,9 +206,84 @@ export default function CatalogEditorPage() {
         ))}
       </Box>
 
+      {/* Sub-mode: rename */}
+      {mode === 'rename' && (
+        <Box marginTop={1}>
+          <Text>重命名：</Text>
+          <TextInput
+            value={draft}
+            onChange={setDraft}
+            onSubmit={() => {
+              const id = selected?.id;
+              if (id) {
+                const title = draft.trim();
+                setPages((ps) => updatePage(ps, id, { title: title || selected.title }));
+                setDirty(true);
+              }
+              setMode('browse');
+            }}
+          />
+        </Box>
+      )}
+
+      {/* Sub-mode: add */}
+      {mode === 'add' && (
+        <Box marginTop={1}>
+          <Text>新增页面标题：</Text>
+          <TextInput
+            value={draft}
+            onChange={setDraft}
+            onSubmit={() => {
+              const title = draft.trim();
+              if (title) {
+                const slug = `custom-${Date.now()}`;
+                setPages((ps) =>
+                  addPage(ps, {
+                    slug,
+                    title,
+                    file: `${slug}.md`,
+                    section: selected?.section ?? '未分类',
+                    group: selected?.group,
+                    level: 'Intermediate',
+                  })
+                );
+                setDirty(true);
+              }
+              setMode('browse');
+            }}
+          />
+        </Box>
+      )}
+
+      {/* Sub-mode: move */}
+      {mode === 'move' && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text>移动到分区：</Text>
+          <SelectInput
+            items={[
+              ...new Set(
+                pages.filter((p) => p.status !== 'tombstone').map((p) => p.section)
+              ),
+            ].map((s) => ({ label: s, value: s }))}
+            onSelect={(item) => {
+              const id = selected?.id;
+              if (id) {
+                setPages((ps) => movePage(ps, id, item.value));
+                setDirty(true);
+              }
+              setMode('browse');
+            }}
+          />
+        </Box>
+      )}
+
       {/* Footer */}
       <Box marginTop={1}>
-        <Text dimColor>↑/↓ 导航 | l 锁定 | x 删除 | u 恢复 | p 深度 | s 保存 | ESC 返回</Text>
+        {mode === 'browse' ? (
+          <Text dimColor>↑/↓ 导航 | a 新增 | r 重命名 | m 移动 | l 锁定 | x 删除 | u 恢复 | p 深度 | s 保存 | ESC 返回</Text>
+        ) : (
+          <Text dimColor>输入后回车确认</Text>
+        )}
       </Box>
     </Box>
   );
