@@ -41,7 +41,7 @@ export {
 export { generateSnapshotName, createVersionSnapshot } from './storage/versioning.js';
 
 // Catalog
-export { deriveId, migrateCatalog, buildCatalogTree, addPage, updatePage, tombstonePage, movePage, toggleLock, setDepth, computeMergePlan, alignRemote, loadBaseFromSnapshot, applyMergePlan, saveScope, listScopes, loadScope, resolveScope } from './catalog/index.js';
+export { deriveId, migrateCatalog, buildCatalogTree, addPage, updatePage, tombstonePage, movePage, toggleLock, setDepth, computeMergePlan, alignRemote, loadBaseFromSnapshot, applyMergePlan, saveScope, listScopes, loadScope, resolveScope, normalizeDeepDiveChildren, buildAddsOnlyPlan, DEEP_DIVE_MAX_CHILDREN } from './catalog/index.js';
 export type { CatalogTree, CatalogTreeSection, CatalogTreeGroup, MergeDecisions, ApplyResult } from './catalog/index.js';
 
 // Output
