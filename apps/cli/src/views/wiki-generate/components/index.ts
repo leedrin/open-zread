@@ -6,3 +6,4 @@
 
 export { default as CatalogSection } from './CatalogSection';
 export { default as ArticlesSection } from './ArticlesSection';
+export { default as TopicManagementPanel } from './TopicManagementPanel';

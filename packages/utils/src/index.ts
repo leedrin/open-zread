@@ -13,6 +13,7 @@ export {
   getWikiJsonPath,
   getCacheDir,
   getWikiDir,
+  getWikiPageFilePath,
 } from './file-io.js';
 
 // Logger
@@ -37,6 +38,13 @@ export { generateSnapshotName, createVersionSnapshot } from './storage/versionin
 
 // Output
 export { generateWikiJson, loadWikiBlueprint } from './output/wiki-content.js';
+export {
+  mutateWikiBlueprint,
+  findSlugConflicts,
+  deleteWikiPage,
+  updateWikiPageMetadata,
+} from './output/wiki-mutation.js';
+export type { UpdatePageMetadataInput, UpdatePageMetadataOutcome } from './output/wiki-mutation.js';
 
 // Provider Registry
 export * from './provider-registry/types.js';

@@ -63,3 +63,10 @@ export function getWikiDir(): string {
 export function getWikiJsonPath(): string {
   return join(getWikiDir(), 'wiki.json');
 }
+
+/**
+ * Wiki 页面 Markdown 文件的落盘路径：.open-zread/wiki/{section}/{file}
+ */
+export function getWikiPageFilePath(section: string, file: string): string {
+  return join(getWikiDir(), section, file);
+}

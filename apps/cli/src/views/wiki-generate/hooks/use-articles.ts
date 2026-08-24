@@ -16,7 +16,7 @@ import { loadConfig, getWikiDir, joinPath, fileExists } from "@open-zread/utils"
 import { generateWikiContent, type ArticleEventPayload } from "@open-zread/orchestrator";
 import { articleEventToState } from "../mapper";
 import { createInitialArticlesState } from "../state";
-import type { ArticlesState, WikiPage } from "../types";
+import type { ArticlesState, WikiPage, PageStatus } from "../types";
 
 // ==================== 接口定义 ====================
 
@@ -38,6 +38,8 @@ interface UseArticlesGenerateReturn {
     start: (pendingPages: WikiPage[]) => Promise<void>;
     /** 重新生成单篇文章 */
     regeneratePage: (slug: string) => Promise<void>;
+    /** 同步页面集合（主题维护新增/删除页面后调用，不重置已有页面状态） */
+    syncPages: (currentPages: WikiPage[]) => Promise<void>;
   };
 }
 
@@ -209,8 +211,54 @@ export function useArticlesGenerate({
     [pages, updateState, handleEvent]
   );
 
+  /**
+   * 同步页面集合
+   *
+   * 主题维护（新增/删除/编辑元数据）操作会直接修改 wiki.json，但不经过
+   * initialize()/start() 这条路径。initialize() 本身只在首次进入时执行一次
+   * （isInitialized 守卫），后续 pages 变化不会重新扫描，导致 statusMap
+   * 与最新的 wiki.json 页面列表脱节（新页面查不到状态、被删除的页面残留）。
+   *
+   * 只做增量对账，不重置已有页面状态：currentPages 中新出现的 slug 按磁盘
+   * 文件是否存在判定初始状态；currentPages 中已不存在的 slug 从 statusMap 移除。
+   */
+  const syncPages = useCallback(
+    async (currentPages: WikiPage[]) => {
+      if (!isInitialized.current) return;
+
+      const currentSlugs = new Set(currentPages.map((p) => p.slug));
+      const wikiDir = getWikiDir();
+
+      const statusesToAdd: Record<string, PageStatus> = {};
+      for (const page of currentPages) {
+        if (page.slug in statusesToAdd) continue;
+        const exists = await fileExists(joinPath(wikiDir, page.section, page.file)).catch(() => false);
+        statusesToAdd[page.slug] = { status: exists ? "completed" : "waiting" };
+      }
+
+      updateState((draft) => {
+        for (const [slug, status] of Object.entries(statusesToAdd)) {
+          if (!(slug in draft.pages)) {
+            draft.pages[slug] = status;
+          }
+        }
+        const remainingPages: typeof draft.pages = {};
+        for (const [slug, status] of Object.entries(draft.pages)) {
+          if (currentSlugs.has(slug)) {
+            remainingPages[slug] = status;
+          }
+        }
+        draft.pages = remainingPages;
+        draft.completedCount = Object.values(draft.pages).filter((p) => p.status === "completed").length;
+        draft.failedCount = Object.values(draft.pages).filter((p) => p.status === "failed").length;
+        draft.pendingCount = currentPages.length - draft.completedCount - draft.failedCount;
+      });
+    },
+    [updateState]
+  );
+
   return {
     state,
-    actions: { initialize, start, regeneratePage },
+    actions: { initialize, start, regeneratePage, syncPages },
   };
 }

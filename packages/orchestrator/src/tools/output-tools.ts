@@ -3,7 +3,7 @@
  */
 
 import type { ToolDefinition, ToolInputParams, ToolContext, ToolResult } from '@open-zread/agent-sdk'
-import { generateWikiJson, loadConfig } from '@open-zread/utils'
+import { generateWikiJson, loadConfig, loadWikiBlueprint, mutateWikiBlueprint, findSlugConflicts, updateWikiPageMetadata } from '@open-zread/utils'
 import type { WikiPage } from '@open-zread/types'
 import type { TechStackSummary } from '../types.js'
 
@@ -337,6 +337,153 @@ export const GenerateSyncBlueprintTool: ToolDefinition = {
         type: 'tool_result',
         tool_use_id: '',
         content: `生成同步蓝图失败: ${message}`,
+        is_error: true
+      }
+    }
+  }
+}
+
+/**
+ * Append Blueprint Tool
+ *
+ * 将新页面追加到现有 wiki.json，不影响其余已有页面。用于"新增主题"场景，
+ * 与 GenerateBlueprintTool/GenerateSyncBlueprintTool 的"整体覆盖"语义不同。
+ */
+export const AppendBlueprintTool: ToolDefinition = {
+  name: 'append_blueprint',
+  description: '将新页面追加到现有 Wiki 蓝图（wiki.json），不影响其余已有页面。用于"新增主题"场景。',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      pages: {
+        type: 'array',
+        description: '待追加的新 Wiki 页面列表（1 篇或多篇兄弟页）',
+        items: {
+          type: 'object',
+          properties: {
+            slug: { type: 'string', description: '页面 slug（如 7-new-feature），必须与现有页面不冲突' },
+            title: { type: 'string' },
+            file: { type: 'string' },
+            section: { type: 'string', description: '所属章节；可以是已有 section，也可以是新的顶层 section' },
+            group: { type: 'string' },
+            level: { type: 'string' },
+            associatedFiles: {
+              type: 'array',
+              items: { type: 'string' }
+            }
+          },
+          required: ['slug', 'title', 'file', 'section']
+        }
+      }
+    },
+    required: ['pages']
+  },
+  isReadOnly: () => false,
+  isConcurrencySafe: () => false,
+  isEnabled: () => true,
+  async prompt() {
+    return 'Append new pages to the existing wiki blueprint.'
+  },
+  async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+    try {
+      const newPages = input.pages as unknown as WikiPage[]
+
+      if (!newPages || !Array.isArray(newPages) || newPages.length === 0) {
+        return {
+          type: 'tool_result',
+          tool_use_id: '',
+          content: '错误: pages 数组不能为空',
+          is_error: true
+        }
+      }
+
+      const existing = await loadWikiBlueprint()
+      const conflicts = findSlugConflicts(existing.pages, newPages.map(p => p.slug))
+
+      if (conflicts.length > 0) {
+        return {
+          type: 'tool_result',
+          tool_use_id: '',
+          content: `错误: 以下 slug 与现有页面冲突，请更换后重新提交: ${conflicts.join(', ')}`,
+          is_error: true
+        }
+      }
+
+      const updated = await mutateWikiBlueprint((pages) => [...pages, ...newPages])
+
+      return {
+        type: 'tool_result',
+        tool_use_id: '',
+        content: `已追加 ${newPages.length} 篇新页面，当前共 ${updated.pages.length} 篇。\n` +
+          `新增: ${newPages.map(p => `${p.slug} (${p.section}${p.group ? '/' + p.group : ''})`).join(', ')}`
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      return {
+        type: 'tool_result',
+        tool_use_id: '',
+        content: `追加蓝图失败: ${message}`,
+        is_error: true
+      }
+    }
+  }
+}
+
+/**
+ * Update Page Metadata Tool
+ *
+ * 修改已有页面的 associatedFiles（供 Agent 结合三层 Repo Map 工具重新
+ * 判断某页面应该关联哪些源码文件/目录）。title/section/group 的直接编辑
+ * 不需要 Agent 参与，由 CLI 直接调用 updateWikiPageMetadata()。
+ */
+export const UpdatePageMetadataTool: ToolDefinition = {
+  name: 'update_page_metadata',
+  description: '修改已有 Wiki 页面的 associatedFiles，用于重新定位该页面应该关联哪些源码文件/目录。',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      slug: { type: 'string', description: '待修改页面的 slug' },
+      associatedFiles: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '新的关联文件/目录路径列表'
+      }
+    },
+    required: ['slug', 'associatedFiles']
+  },
+  isReadOnly: () => false,
+  isConcurrencySafe: () => false,
+  isEnabled: () => true,
+  async prompt() {
+    return "Update a wiki page's associatedFiles."
+  },
+  async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+    try {
+      const slug = input.slug as unknown as string
+      const associatedFiles = input.associatedFiles as unknown as string[]
+
+      if (!slug || !associatedFiles || !Array.isArray(associatedFiles)) {
+        return {
+          type: 'tool_result',
+          tool_use_id: '',
+          content: '错误: slug 和 associatedFiles 均为必填',
+          is_error: true
+        }
+      }
+
+      const outcome = await updateWikiPageMetadata({ slug, associatedFiles })
+
+      return {
+        type: 'tool_result',
+        tool_use_id: '',
+        content: `已更新页面 ${outcome.page.slug} 的关联文件: ${associatedFiles.join(', ')}`
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      return {
+        type: 'tool_result',
+        tool_use_id: '',
+        content: `更新页面元数据失败: ${message}`,
         is_error: true
       }
     }

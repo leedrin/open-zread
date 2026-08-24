@@ -155,6 +155,14 @@ export function useWikiGenerate(options?: UseWikiGenerateOptions): UseWikiGenera
     }
   }, [catalog.state.status, flowState]);
 
+  // 场景3：首次初始化完成后，pages 集合发生变化（如主题维护新增/删除页面）
+  // 时保持 articles 状态同步。initialize() 本身只执行一次，不会感知后续变化。
+  useEffect(() => {
+    if (pagesInitializedRef.current) {
+      articles.actions.syncPages(pages);
+    }
+  }, [pages, articles.actions.syncPages]);
+
   // 聚合状态
   const state = useMemo<WikiGenerateState>(
     () => ({

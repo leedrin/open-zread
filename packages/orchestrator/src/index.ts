@@ -15,6 +15,12 @@ export type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, Articl
 export { syncWiki } from './wiki/sync-wiki.js'
 export type { SyncResult } from './wiki/sync-wiki.js'
 
+// Wiki Topic Management: 新增主题 / 编辑元数据（associatedFiles） / 小节级重新生成
+export { appendWikiTopic, updateWikiTopicAssociatedFiles } from './orchestrator.js'
+export type { AppendTopicResult, UpdateTopicAssociatedFilesResult } from './orchestrator.js'
+export { regenerateWikiPageSection } from './wiki/regenerate-section.js'
+export type { RegenerateSectionResult } from './wiki/regenerate-section.js'
+
 // Types
 export * from './types.js'
 

@@ -11,6 +11,7 @@
 export { useCatalogGenerate } from './use-catalog';
 export { useArticlesGenerate } from './use-articles';
 export { useWikiGenerate } from './use-wiki-generate';
+export { useTopicManagement } from './use-topic-management';
 
 // 兼容旧命名（过渡期）
 export { useCatalogGenerate as useWikiCatalogGenerate } from './use-catalog';
