@@ -30,6 +30,13 @@ bun run lint       # ESLint 代码规范检查 - 必须
 bun run lint:fix   # ESLint 自动修复（可选，lint 有错误时使用）
 ```
 
+**测试**（Bun 内置测试运行器，测试文件位于各包 `__tests__/` 目录下）:
+```bash
+bun test                                                    # 运行全部测试
+bun test packages/repo-analyzer/src/repo-map/__tests__/repo-map.test.ts  # 运行单个测试文件
+bun test -t "test name"                                     # 按名称过滤测试用例
+```
+
 **单个包操作**:
 ```bash
 bun run build --filter=@open-zread/cli       # 只构建 CLI 包

@@ -66,12 +66,11 @@
     },
     "apps/cli": {
       "name": "@open-zread/cli",
-      "version": "1.1.0",
+      "version": "1.2.2",
       "bin": {
         "open-zread": "./dist/index.js",
       },
       "dependencies": {
-        "@open-zread/agent-sdk": "workspace:*",
         "commander": "^14.0.3",
         "express": "^5.1.0",
         "fullscreen-ink": "^0.1.0",
@@ -87,6 +86,7 @@
         "zustand": "^5.0.12",
       },
       "devDependencies": {
+        "@open-zread/agent-sdk": "workspace:*",
         "@open-zread/orchestrator": "workspace:*",
         "@open-zread/repo-analyzer": "workspace:*",
         "@open-zread/types": "workspace:*",
