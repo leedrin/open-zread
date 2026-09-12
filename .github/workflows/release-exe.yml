@@ -15,13 +15,16 @@ jobs:
         include:
           - os: windows-latest
             target: bun-windows-x64
-            artifact: open-zread-windows-x64.exe
+            artifact: open-zread.exe
+            output_dir: open-zread-windows-x64
           - os: macos-latest
             target: bun-darwin-arm64
             artifact: open-zread-darwin-arm64
+            output_dir: open-zread-darwin-arm64
           - os: ubuntu-latest
             target: bun-linux-x64
             artifact: open-zread-linux-x64
+            output_dir: open-zread-linux-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +37,6 @@ jobs:
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/exe/${{ matrix.artifact }}
+          files: dist/exe/${{ matrix.output_dir }}/${{ matrix.artifact }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -130,7 +130,9 @@ async function runBuild() {
 
   for (const target of targets) {
     const info = TARGETS[target];
-    const exeName = `open-zread-${info.os}-${info.arch}${info.ext}`;
+    const exeName = target === 'bun-windows-x64'
+      ? 'open-zread.exe'
+      : `open-zread-${info.os}-${info.arch}${info.ext}`;
     const targetDir = join(OUT_DIR, `open-zread-${info.os}-${info.arch}`);
     const outfile = join(targetDir, exeName);
 
