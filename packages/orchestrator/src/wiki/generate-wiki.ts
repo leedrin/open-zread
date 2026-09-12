@@ -321,6 +321,17 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
     glossary = blueprint.glossary;
   }
 
+  // Glossary 兜底：调用方（如 CLI 的 pages/incremental 路径）通常只传 pages，不带 glossary，
+  // 导致 finalize 跳过术语表页渲染。统一从 wiki.json 回收 glossary，确保任何入口都能产出术语表页。
+  if (!glossary || glossary.length === 0) {
+    try {
+      const bp = await loadWikiBlueprint(options?.blueprintPath);
+      if (bp.glossary && bp.glossary.length > 0) glossary = bp.glossary;
+    } catch {
+      // wiki.json 不存在或无法解析——跳过，按无术语表处理
+    }
+  }
+
   logger.info(`开始生成 Wiki 内容：${pages.length} 个页面，并发数 ${maxConcurrent}`);
 
   const limit = pLimit(maxConcurrent);
