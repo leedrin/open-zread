@@ -7,6 +7,7 @@ export interface ZreadNativePage {
   title: string;
   relativePath: string;
   absolutePath: string;
+  content: string;
   native: Readonly<Record<string, unknown>>;
 }
 
@@ -57,6 +58,7 @@ export interface ZreadCliInspection {
     existingDraftActions: boolean;
     skipFailedPages: boolean;
     cliSelfUpdate: boolean;
+    structuredProgress: true;
     incrementalWikiUpdate: false;
   };
   diagnostics: string[];
@@ -89,13 +91,26 @@ export interface ProbeZreadGenerationOptions {
 }
 
 export interface ZreadGenerationProbe {
-  status: 'succeeded' | 'authentication_failed' | 'cancelled' | 'failed' | 'incomplete_output';
+  status: 'succeeded' | 'authentication_failed' | 'cancelled' | 'failed' | 'incomplete_output' | 'unchanged_output';
   exitCode: number;
   previousPointer?: string;
   currentPointer?: string;
   outputValidated: boolean;
   versionChanged: boolean;
+  progress: ZreadProgressSnapshot[];
   diagnostics: string[];
+}
+
+export interface ZreadProgressSnapshot {
+  done: boolean;
+  state?: string;
+  catalogStatus?: string;
+  catalogAgentStatus?: number;
+  catalogToolName?: string;
+  pagesDone?: number;
+  pagesTotal?: number;
+  waitingRetry?: boolean;
+  waitingFor: string[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -180,6 +195,7 @@ export async function inspectZreadCli(options: InspectZreadCliOptions): Promise<
       existingDraftActions: generateHelp.stdout.includes('--draft'),
       skipFailedPages: generateHelp.stdout.includes('--skip-failed'),
       cliSelfUpdate: updateHelp.stdout.includes('Update Zread to the latest version'),
+      structuredProgress: true,
       incrementalWikiUpdate: false,
     },
     diagnostics: collectDiagnostics(
@@ -210,21 +226,28 @@ export async function inspectZreadWiki(projectRoot: string): Promise<ZreadWikiIn
     throw new Error('Zread catalog must be an object with a pages array');
   }
 
-  const pages = parsed.pages.map((value): ZreadNativePage => {
+  const pages = await Promise.all(parsed.pages.map(async (value): Promise<ZreadNativePage> => {
     if (!isRecord(value)) {
       throw new Error('Zread catalog page must be an object');
     }
     const relativePath = requireString(value, 'file');
     const absolutePath = resolve(versionPath, relativePath);
     assertContained(versionPath, absolutePath, 'Zread page path');
+    let content: string;
+    try {
+      content = await readFile(absolutePath, 'utf8');
+    } catch (error) {
+      throw new Error(`Unable to read Zread page ${relativePath}`, { cause: error });
+    }
     return {
       slug: requireString(value, 'slug'),
       title: requireString(value, 'title'),
       relativePath,
       absolutePath,
+      content,
       native: value,
     };
-  });
+  }));
 
   return {
     status: 'readable',
@@ -304,6 +327,52 @@ async function readCurrentPointer(projectRoot: string): Promise<string | undefin
   }
 }
 
+function parseZreadStdioEvents(stdout: string): ReadonlyArray<Readonly<Record<string, unknown>>> {
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        const parsed: unknown = JSON.parse(line);
+        return isRecord(parsed) ? [parsed] : [];
+      } catch {
+        return [];
+      }
+    });
+}
+
+export function parseZreadProgress(stdout: string): ZreadProgressSnapshot[] {
+  const snapshots = parseZreadStdioEvents(stdout).map((event): ZreadProgressSnapshot => {
+    const vm = isRecord(event.vm) ? event.vm : undefined;
+    const catalog = vm && isRecord(vm.catalog) ? vm.catalog : undefined;
+    const pages = vm && isRecord(vm.pages) ? vm.pages : undefined;
+    const waitingFor = Array.isArray(event.waiting_for)
+      ? event.waiting_for.filter((value): value is string => typeof value === 'string')
+      : [];
+
+    return {
+      done: event.done === true,
+      ...(typeof vm?.state === 'string' ? { state: vm.state } : {}),
+      ...(typeof catalog?.status === 'string' ? { catalogStatus: catalog.status } : {}),
+      ...(typeof catalog?.agent_status === 'number'
+        ? { catalogAgentStatus: catalog.agent_status }
+        : {}),
+      ...(typeof catalog?.tool_name === 'string' ? { catalogToolName: catalog.tool_name } : {}),
+      ...(typeof pages?.done === 'number' ? { pagesDone: pages.done } : {}),
+      ...(typeof pages?.total === 'number' ? { pagesTotal: pages.total } : {}),
+      ...(typeof pages?.waiting_retry === 'boolean'
+        ? { waitingRetry: pages.waiting_retry }
+        : {}),
+      waitingFor,
+    };
+  });
+
+  return snapshots.filter((snapshot, index) => (
+    index === 0 || JSON.stringify(snapshot) !== JSON.stringify(snapshots[index - 1])
+  ));
+}
+
 export async function probeZreadGeneration(
   options: ProbeZreadGenerationOptions,
 ): Promise<ZreadGenerationProbe> {
@@ -315,6 +384,7 @@ export async function probeZreadGeneration(
   );
   const currentPointer = await readCurrentPointer(options.projectRoot);
   const output = `${result.stdout}\n${result.stderr}`;
+  const progress = parseZreadProgress(result.stdout);
   let status: ZreadGenerationProbe['status'];
   if (result.cancelled) {
     status = 'cancelled';
@@ -324,6 +394,8 @@ export async function probeZreadGeneration(
     status = 'failed';
   } else if (!currentPointer) {
     status = 'incomplete_output';
+  } else if (previousPointer !== undefined && currentPointer === previousPointer) {
+    status = 'unchanged_output';
   } else {
     status = 'succeeded';
   }
@@ -335,6 +407,7 @@ export async function probeZreadGeneration(
     currentPointer,
     outputValidated: status === 'succeeded',
     versionChanged: currentPointer !== undefined && currentPointer !== previousPointer,
+    progress,
     diagnostics: collectDiagnostics(result.stderr),
   };
 }

@@ -6,6 +6,8 @@ import {
   type ZreadCommandOptions,
   type ZreadCommandResult,
 } from '../packages/wiki-provider-zread/src/index.js';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 const usage = `Usage: bun run validate:zread-contract [options]
 
@@ -26,6 +28,37 @@ function readOption(args: readonly string[], name: string): string | undefined {
     throw new Error(`${name} requires a value`);
   }
   return value;
+}
+
+export function parseCancelAfterMs(value: string): number {
+  if (!/^[1-9]\d*$/.test(value)) {
+    throw new Error('--cancel-after-ms must be a positive safe integer');
+  }
+  const delay = Number(value);
+  if (!Number.isSafeInteger(delay)) {
+    throw new Error('--cancel-after-ms must be a positive safe integer');
+  }
+  return delay;
+}
+
+export function preferNativeZreadExecutable(
+  discovered: string,
+  platform = process.platform,
+  fileExists: (path: string) => boolean = existsSync,
+): string {
+  if (platform !== 'win32' || !discovered.toLowerCase().endsWith('.cmd')) {
+    return discovered;
+  }
+  const candidate = join(
+    dirname(discovered),
+    'node_modules',
+    'zread_cli',
+    'node_modules',
+    '@zread',
+    'cli-win32-x64',
+    'zread.exe',
+  );
+  return fileExists(candidate) ? candidate : discovered;
 }
 
 async function runZreadCommand(
@@ -65,10 +98,11 @@ async function main(): Promise<void> {
   }
 
   const projectRoot = readOption(args, '--project') ?? process.cwd();
-  const executable = readOption(args, '--executable') ?? Bun.which('zread');
-  if (!executable) {
+  const requestedExecutable = readOption(args, '--executable') ?? Bun.which('zread');
+  if (!requestedExecutable) {
     throw new Error('Zread executable was not found; pass --executable explicitly');
   }
+  const executable = preferNativeZreadExecutable(requestedExecutable);
 
   const cli = await inspectZreadCli({ executable, run: runZreadCommand });
   let wikiBefore: Awaited<ReturnType<typeof inspectZreadWiki>> | { status: 'missing_or_invalid'; error: string };
@@ -91,7 +125,7 @@ async function main(): Promise<void> {
     const abortController = new AbortController();
     const cancelAfter = readOption(args, '--cancel-after-ms');
     const cancelTimer = cancelAfter
-      ? setTimeout(() => abortController.abort(), Number.parseInt(cancelAfter, 10))
+      ? setTimeout(() => abortController.abort(), parseCancelAfterMs(cancelAfter))
       : undefined;
     try {
       generation = await probeZreadGeneration({
@@ -116,4 +150,6 @@ async function main(): Promise<void> {
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 }
 
-await main();
+if (import.meta.main) {
+  await main();
+}

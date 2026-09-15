@@ -15,6 +15,7 @@ import {
   inspectZreadWiki,
   probeZreadNativeWrite,
   probeZreadGeneration,
+  parseZreadProgress,
   writeZreadPage,
   type ZreadCommandRunner,
 } from '../index.js';
@@ -31,11 +32,40 @@ describe('Zread native integration contract', () => {
     expect(result.pages.map((page) => ({
       slug: page.slug,
       relativePath: page.relativePath,
+      content: page.content,
     }))).toEqual([
-      { slug: 'project-overview', relativePath: 'project-overview.md' },
-      { slug: 'protocol-integration', relativePath: 'protocol-integration.md' },
+      {
+        slug: 'project-overview',
+        relativePath: 'project-overview.md',
+        content: '# 项目概览\n\n这是一个 Zread 原生平铺页面。\n',
+      },
+      {
+        slug: 'protocol-integration',
+        relativePath: 'protocol-integration.md',
+        content: '# 协议集成\n\n协议层负责网络消息编码。\n',
+      },
     ]);
     expect(result.pages.every((page) => existsSync(page.absolutePath))).toBe(true);
+  });
+
+  test('rejects a catalog that references a missing native page', async () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'zread-missing-page-contract-'));
+    cpSync(fixtureRoot, temporaryRoot, { recursive: true });
+    const missingPage = join(
+      temporaryRoot,
+      '.zread',
+      'wiki',
+      'versions',
+      '2026-05-10-124151',
+      'project-overview.md',
+    );
+    rmSync(missingPage);
+
+    try {
+      await expect(inspectZreadWiki(temporaryRoot)).rejects.toThrow('project-overview.md');
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
   });
 
   test('reports version and only the generation capabilities exposed by the CLI', async () => {
@@ -93,9 +123,39 @@ describe('Zread native integration contract', () => {
       existingDraftActions: true,
       skipFailedPages: true,
       cliSelfUpdate: true,
+      structuredProgress: true,
       incrementalWikiUpdate: false,
     });
     expect(result.diagnostics).toEqual(['write error: cannot rotate log']);
+  });
+
+  test('normalizes machine-readable VM snapshots into progress records', () => {
+    const progress = parseZreadProgress([
+      JSON.stringify({
+        vm: {
+          state: 'running',
+          catalog: { status: 'done', agent_status: 5, tool_name: 'get_dir_structure' },
+          pages: { done: 1, total: 8, waiting_retry: false },
+        },
+        waiting_for: ['quit'],
+      }),
+      JSON.stringify({ done: true }),
+    ].join('\n'));
+
+    expect(progress).toEqual([
+      {
+        done: false,
+        state: 'running',
+        catalogStatus: 'done',
+        catalogAgentStatus: 5,
+        catalogToolName: 'get_dir_structure',
+        pagesDone: 1,
+        pagesTotal: 8,
+        waitingRetry: false,
+        waitingFor: ['quit'],
+      },
+      { done: true, waitingFor: [] },
+    ]);
   });
 
   test('proves direct write access without changing page bytes or native catalog fields', async () => {
@@ -166,6 +226,9 @@ describe('Zread native integration contract', () => {
     const temporaryRoot = mkdtempSync(join(tmpdir(), 'zread-generate-contract-'));
     cpSync(fixtureRoot, temporaryRoot, { recursive: true });
     const wikiRoot = join(temporaryRoot, '.zread', 'wiki');
+    const oldVersionPath = join(wikiRoot, 'versions', '2026-05-10-124151');
+    const oldCatalogBefore = readFileSync(join(oldVersionPath, 'wiki.json'));
+    const oldPageBefore = readFileSync(join(oldVersionPath, 'project-overview.md'));
     const nextPointer = 'versions/2026-09-15-220000';
     const run: ZreadCommandRunner = async () => {
       cpSync(
@@ -189,9 +252,28 @@ describe('Zread native integration contract', () => {
       expect(result.versionChanged).toBe(true);
       expect(result.previousPointer).toBe('versions/2026-05-10-124151');
       expect(result.currentPointer).toBe(nextPointer);
+      expect(result.progress).toEqual([{ done: true, waitingFor: [] }]);
+      expect(readFileSync(join(oldVersionPath, 'wiki.json')).equals(oldCatalogBefore)).toBe(true);
+      expect(readFileSync(join(oldVersionPath, 'project-overview.md')).equals(oldPageBefore)).toBe(true);
     } finally {
       rmSync(temporaryRoot, { recursive: true, force: true });
     }
+  });
+
+  test('does not validate exit zero when Zread leaves the old current pointer unchanged', async () => {
+    const result = await probeZreadGeneration({
+      executable: 'zread',
+      projectRoot: fixtureRoot,
+      run: async () => ({
+        exitCode: 0,
+        stdout: '{"done":true}\n',
+        stderr: '',
+      }),
+    });
+
+    expect(result.status).toBe('unchanged_output');
+    expect(result.outputValidated).toBe(false);
+    expect(result.versionChanged).toBe(false);
   });
 
   test('distinguishes cancellation, ordinary failure, and incomplete output', async () => {
