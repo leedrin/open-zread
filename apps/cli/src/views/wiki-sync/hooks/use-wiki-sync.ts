@@ -3,11 +3,11 @@
  *
  * 流程：检测 → 规划（LLM） → 执行（归档 + 并发生成 .md）
  */
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useImmer } from 'use-immer';
 import { useWiki } from '../../../provider';
 import { WikiStore, loadConfig } from '@open-zread/utils';
-import { syncWiki, generateWikiContent, type CatalogEvent, type ArticleEventPayload } from '@open-zread/orchestrator';
+import { createOpenZreadApplication, type CatalogEvent, type ArticleEventPayload } from '@open-zread/orchestrator';
 import { syncCatalogEventToState, syncArticleEventToState } from '../mapper';
 import type { SyncCatalogEventPayload } from '../mapper';
 import { createInitialSyncState } from '../state';
@@ -31,6 +31,7 @@ export function useWikiSync(): UseWikiSyncReturn {
   const [state, updateState] = useImmer<WikiSyncState>(() => createInitialSyncState([]));
   const [allCompleted, setAllCompleted] = useState(false);
   const isRunning = useRef(false);
+  const application = useMemo(() => createOpenZreadApplication(process.cwd()), []);
 
   /** Agent 目录事件回调 */
   const handleCatalogEvent = useCallback(
@@ -77,7 +78,7 @@ export function useWikiSync(): UseWikiSyncReturn {
 
     try {
       // 阶段1-2: syncWiki
-      const result = await syncWiki(handleCatalogEvent);
+      const result = await application.syncWiki(handleCatalogEvent);
 
       // 设置 syncPages
       const allPages = [
@@ -94,7 +95,7 @@ export function useWikiSync(): UseWikiSyncReturn {
 
       // 阶段3: 执行
       // 3a: 归档
-      const store = new WikiStore();
+      const store = new WikiStore(application.projectRoot);
       for (const page of result.diff.archivedPages) {
         await store.archivePage(page);
       }
@@ -113,7 +114,7 @@ export function useWikiSync(): UseWikiSyncReturn {
           concurrent = config.concurrency.max_concurrent;
         } catch { /* use default */ }
 
-        await generateWikiContent({
+        await application.generateWikiContent({
           pages: [...result.diff.newPages, ...result.diff.updatedPages],
           maxConcurrent: concurrent,
           onEvent: handleArticleEvent,
@@ -141,7 +142,7 @@ export function useWikiSync(): UseWikiSyncReturn {
     } finally {
       isRunning.current = false;
     }
-  }, [handleCatalogEvent, handleArticleEvent, reload, updateState]);
+  }, [application, handleCatalogEvent, handleArticleEvent, reload, updateState]);
 
   /** 自动触发同步 */
   useEffect(() => {
@@ -195,7 +196,7 @@ export function useWikiSync(): UseWikiSyncReturn {
       } catch { /* use default */ }
 
       try {
-        await generateWikiContent({
+        await application.generateWikiContent({
           pages: [page],
           maxConcurrent: concurrent,
           onEvent: handleArticleEvent,
@@ -209,7 +210,7 @@ export function useWikiSync(): UseWikiSyncReturn {
         });
       }
     },
-    [state.syncPages, state.articles.pages, updateState, handleArticleEvent]
+    [application, state.syncPages, state.articles.pages, updateState, handleArticleEvent]
   );
 
   return {

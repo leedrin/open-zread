@@ -14,7 +14,7 @@ import GenerateCatalog from './prompts/generate-catalog';
 import AppendTopicPrompt from './prompts/append-topic';
 import { GenerateBlueprintTool, ValidateBlueprintTool, AppendBlueprintTool, UpdatePageMetadataTool } from './tools/output-tools.js';
 import { GetCoreSignaturesTool, GetDirectoryTreeTool, GetModuleDetailsTool } from './tools/repo-map-tools.js';
-import type { BlueprintResult, CatalogEvent } from './types.js';
+import type { BlueprintResult, CatalogEvent, GenerateWikiCatalogOptions } from './types.js';
 
 /** Blueprint Agent 工具列表 */
 const BLUEPRINT_TOOLS = [
@@ -43,12 +43,17 @@ const BLUEPRINT_TOOLS = [
  * @returns BlueprintResult with output path and metadata
  */
 export async function generateWikiCatalog(
-  onEvent?: (event: CatalogEvent) => void
+  onEventOrOptions?: ((event: CatalogEvent) => void) | GenerateWikiCatalogOptions,
 ): Promise<BlueprintResult> {
+  const options = typeof onEventOrOptions === 'function'
+    ? { onEvent: onEventOrOptions }
+    : onEventOrOptions;
+
   const result = await createAgent({
     tools: BLUEPRINT_TOOLS,
     prompts: GenerateCatalog as string,
-    onEvent,
+    onEvent: options?.onEvent,
+    projectRoot: options?.projectRoot,
   });
 
   return {
@@ -85,19 +90,20 @@ export interface AppendTopicResult {
  */
 export async function appendWikiTopic(
   topicDescription: string,
-  onEvent?: (event: CatalogEvent) => void
+  onEvent?: (event: CatalogEvent) => void,
+  projectRoot?: string,
 ): Promise<AppendTopicResult> {
   const startTime = performance.now();
 
   onEvent?.({ type: 'scanning' });
-  const manifest = await scanFiles();
-  await saveCachedManifest(manifest);
+  const manifest = await scanFiles(projectRoot);
+  await saveCachedManifest(manifest, projectRoot);
 
   onEvent?.({ type: 'parsing' });
-  const symbols = await parseFiles(manifest);
-  await saveCachedSymbols(symbols);
+  const symbols = await parseFiles(manifest, projectRoot);
+  await saveCachedSymbols(symbols, projectRoot);
 
-  const before = await loadWikiBlueprint();
+  const before = await loadWikiBlueprint(undefined, projectRoot);
   const beforeSlugs = new Set(before.pages.map(p => p.slug));
   const catalogSummary = before.pages
     .map(p => `- [${p.slug}] ${p.title} (section: ${p.section}${p.group ? `, group: ${p.group}` : ''})`)
@@ -112,9 +118,10 @@ export async function appendWikiTopic(
       AppendTopicPrompt as string,
     ].join('\n\n'),
     onEvent,
+    projectRoot,
   });
 
-  const after = await loadWikiBlueprint();
+  const after = await loadWikiBlueprint(undefined, projectRoot);
   const addedPages = after.pages.filter(p => !beforeSlugs.has(p.slug));
 
   return {
@@ -153,19 +160,20 @@ export interface UpdateTopicAssociatedFilesResult {
 export async function updateWikiTopicAssociatedFiles(
   slug: string,
   instruction: string,
-  onEvent?: (event: CatalogEvent) => void
+  onEvent?: (event: CatalogEvent) => void,
+  projectRoot?: string,
 ): Promise<UpdateTopicAssociatedFilesResult> {
   const startTime = performance.now();
 
   onEvent?.({ type: 'scanning' });
-  const manifest = await scanFiles();
-  await saveCachedManifest(manifest);
+  const manifest = await scanFiles(projectRoot);
+  await saveCachedManifest(manifest, projectRoot);
 
   onEvent?.({ type: 'parsing' });
-  const symbols = await parseFiles(manifest);
-  await saveCachedSymbols(symbols);
+  const symbols = await parseFiles(manifest, projectRoot);
+  await saveCachedSymbols(symbols, projectRoot);
 
-  const blueprint = await loadWikiBlueprint();
+  const blueprint = await loadWikiBlueprint(undefined, projectRoot);
   const target = blueprint.pages.find(p => p.slug === slug);
   if (!target) {
     throw new Error(`页面不存在: ${slug}`);
@@ -179,9 +187,10 @@ export async function updateWikiTopicAssociatedFiles(
       '## 任务\n请结合三层 Repo Map 工具重新探索代码，判断这篇页面应该关联哪些源码文件/目录，然后调用 update_page_metadata 提交新的 associatedFiles。',
     ].join('\n\n'),
     onEvent,
+    projectRoot,
   });
 
-  const after = await loadWikiBlueprint();
+  const after = await loadWikiBlueprint(undefined, projectRoot);
   const updatedPage = after.pages.find(p => p.slug === slug);
   if (!updatedPage) {
     throw new Error(`更新后未找到页面: ${slug}`);

@@ -56,7 +56,7 @@ export const GenerateBlueprintTool: ToolDefinition = {
   async prompt() {
     return 'Generate and save wiki blueprint JSON file.'
   },
-  async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+  async call(input: ToolInputParams, context: ToolContext): Promise<ToolResult> {
     try {
       const pages = input.pages as unknown as WikiPage[]
       const techStackSummary = input.techStackSummary as unknown as TechStackSummary | undefined
@@ -75,7 +75,7 @@ export const GenerateBlueprintTool: ToolDefinition = {
       }
 
       // Generate and save wiki.json
-      const outputPath = await generateWikiJson(pages, config, techStackSummary)
+      const outputPath = await generateWikiJson(pages, config, techStackSummary, context.cwd)
 
       // Build result summary
       const groups = [...new Set(pages.map(p => p.group).filter(Boolean))]
@@ -137,7 +137,7 @@ export const ValidateBlueprintTool: ToolDefinition = {
   async prompt() {
     return 'Validate blueprint associated files/directories exist.'
   },
-  async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+  async call(input: ToolInputParams, context: ToolContext): Promise<ToolResult> {
     try {
       const pages = input.pages as unknown as WikiPage[]
       const projectRoot = input.projectRoot as unknown as string | undefined
@@ -145,7 +145,7 @@ export const ValidateBlueprintTool: ToolDefinition = {
       const { join } = await import('path')
       const { getProjectRoot } = await import('@open-zread/utils')
 
-      const root = projectRoot || getProjectRoot()
+      const root = projectRoot || getProjectRoot(context.cwd)
 
       interface PathInfo {
         path: string
@@ -297,7 +297,7 @@ export const GenerateSyncBlueprintTool: ToolDefinition = {
   async prompt() {
     return 'Generate and save synced wiki blueprint JSON file.'
   },
-  async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+  async call(input: ToolInputParams, context: ToolContext): Promise<ToolResult> {
     try {
       const pages = input.pages as unknown as (WikiPage & { status?: string })[]
       const techStackSummary = input.techStackSummary as unknown as TechStackSummary | undefined
@@ -319,7 +319,7 @@ export const GenerateSyncBlueprintTool: ToolDefinition = {
       }
 
       const config = await loadConfig()
-      const outputPath = await generateWikiJson(pages as WikiPage[], config, techStackSummary)
+      const outputPath = await generateWikiJson(pages as WikiPage[], config, techStackSummary, context.cwd)
 
       return {
         type: 'tool_result',
@@ -384,7 +384,7 @@ export const AppendBlueprintTool: ToolDefinition = {
   async prompt() {
     return 'Append new pages to the existing wiki blueprint.'
   },
-  async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+  async call(input: ToolInputParams, context: ToolContext): Promise<ToolResult> {
     try {
       const newPages = input.pages as unknown as WikiPage[]
 
@@ -397,7 +397,7 @@ export const AppendBlueprintTool: ToolDefinition = {
         }
       }
 
-      const existing = await loadWikiBlueprint()
+      const existing = await loadWikiBlueprint(undefined, context.cwd)
       const conflicts = findSlugConflicts(existing.pages, newPages.map(p => p.slug))
 
       if (conflicts.length > 0) {
@@ -409,7 +409,7 @@ export const AppendBlueprintTool: ToolDefinition = {
         }
       }
 
-      const updated = await mutateWikiBlueprint((pages) => [...pages, ...newPages])
+      const updated = await mutateWikiBlueprint((pages) => [...pages, ...newPages], context.cwd)
 
       return {
         type: 'tool_result',
@@ -457,7 +457,7 @@ export const UpdatePageMetadataTool: ToolDefinition = {
   async prompt() {
     return "Update a wiki page's associatedFiles."
   },
-  async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+  async call(input: ToolInputParams, context: ToolContext): Promise<ToolResult> {
     try {
       const slug = input.slug as unknown as string
       const associatedFiles = input.associatedFiles as unknown as string[]
@@ -471,7 +471,7 @@ export const UpdatePageMetadataTool: ToolDefinition = {
         }
       }
 
-      const outcome = await updateWikiPageMetadata({ slug, associatedFiles })
+      const outcome = await updateWikiPageMetadata({ slug, associatedFiles }, context.cwd)
 
       return {
         type: 'tool_result',

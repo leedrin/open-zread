@@ -74,7 +74,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
   if (options?.pages && options.pages.length > 0) {
     pages = options.pages;
   } else {
-    const blueprint = await loadWikiBlueprint(options?.blueprintPath);
+    const blueprint = await loadWikiBlueprint(options?.blueprintPath, options?.projectRoot);
     pages = blueprint.pages;
   }
 
@@ -119,6 +119,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           ],
           prompts: buildPagePrompt(page),
           maxTurns: 30,
+          projectRoot: options?.projectRoot,
           // 通过 onEvent 将 CatalogEvent 转换为 ArticleEventPayload
           onEvent: (catalogEvent) => {
             // 将 CatalogEvent 转换为 ArticleEventPayload

@@ -1,5 +1,5 @@
 import { readFile, writeFile, mkdir, rm, stat } from 'fs/promises';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 
 export async function ensureDir(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true });
@@ -44,29 +44,29 @@ export function joinPath(...parts: string[]): string {
   return join(...parts);
 }
 
-export function getProjectRoot(): string {
-  return process.cwd();
+export function getProjectRoot(projectRoot?: string): string {
+  return resolve(projectRoot ?? process.cwd());
 }
 
-export function getOutputDir(): string {
-  return join(getProjectRoot(), '.open-zread');
+export function getOutputDir(projectRoot?: string): string {
+  return join(getProjectRoot(projectRoot), '.open-zread');
 }
 
-export function getCacheDir(): string {
-  return join(getOutputDir(), 'cache');
+export function getCacheDir(projectRoot?: string): string {
+  return join(getOutputDir(projectRoot), 'cache');
 }
 
-export function getWikiDir(): string {
-  return join(getOutputDir(), 'wiki');
+export function getWikiDir(projectRoot?: string): string {
+  return join(getOutputDir(projectRoot), 'wiki');
 }
 
-export function getWikiJsonPath(): string {
-  return join(getWikiDir(), 'wiki.json');
+export function getWikiJsonPath(projectRoot?: string): string {
+  return join(getWikiDir(projectRoot), 'wiki.json');
 }
 
 /**
  * Wiki 页面 Markdown 文件的落盘路径：.open-zread/wiki/{section}/{file}
  */
-export function getWikiPageFilePath(section: string, file: string): string {
-  return join(getWikiDir(), section, file);
+export function getWikiPageFilePath(section: string, file: string, projectRoot?: string): string {
+  return join(getWikiDir(projectRoot), section, file);
 }

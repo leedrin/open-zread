@@ -23,13 +23,14 @@ import { loadWikiBlueprint, generateWikiJson } from './wiki-content.js';
  * 手写 load→改 pages→write 时漏传字段。
  */
 export async function mutateWikiBlueprint(
-  mutator: (pages: WikiPage[]) => WikiPage[] | Promise<WikiPage[]>
+  mutator: (pages: WikiPage[]) => WikiPage[] | Promise<WikiPage[]>,
+  projectRoot?: string,
 ): Promise<import('@open-zread/types').WikiOutput> {
-  const blueprint = await loadWikiBlueprint();
+  const blueprint = await loadWikiBlueprint(undefined, projectRoot);
   const nextPages = await mutator(blueprint.pages);
   const config = await loadConfig();
-  await generateWikiJson(nextPages, config, blueprint.techStackSummary);
-  return loadWikiBlueprint();
+  await generateWikiJson(nextPages, config, blueprint.techStackSummary, projectRoot);
+  return loadWikiBlueprint(undefined, projectRoot);
 }
 
 /**
@@ -66,14 +67,14 @@ export function findSlugConflicts(
  * 不涉及 WikiStore.archivePage/versioning 那套死代码路径。
  * 磁盘文件缺失时不报错（force: true），不阻塞 wiki.json 的清理。
  */
-export async function deleteWikiPage(slug: string): Promise<WikiPage | null> {
-  const blueprint = await loadWikiBlueprint();
+export async function deleteWikiPage(slug: string, projectRoot?: string): Promise<WikiPage | null> {
+  const blueprint = await loadWikiBlueprint(undefined, projectRoot);
   const removedPage = blueprint.pages.find((p) => p.slug === slug) ?? null;
   if (!removedPage) return null;
 
-  await mutateWikiBlueprint((pages) => pages.filter((p) => p.slug !== slug));
+  await mutateWikiBlueprint((pages) => pages.filter((p) => p.slug !== slug), projectRoot);
 
-  const filePath = getWikiPageFilePath(removedPage.section, removedPage.file);
+  const filePath = getWikiPageFilePath(removedPage.section, removedPage.file, projectRoot);
   await rm(filePath, { force: true });
 
   return removedPage;
@@ -105,9 +106,10 @@ export interface UpdatePageMetadataOutcome {
  * 由调用方（CLI/orchestrator 层）决定，本函数不依赖 Agent 或内容生成逻辑。
  */
 export async function updateWikiPageMetadata(
-  input: UpdatePageMetadataInput
+  input: UpdatePageMetadataInput,
+  projectRoot?: string,
 ): Promise<UpdatePageMetadataOutcome> {
-  const blueprint = await loadWikiBlueprint();
+  const blueprint = await loadWikiBlueprint(undefined, projectRoot);
   const target = blueprint.pages.find((p) => p.slug === input.slug);
   if (!target) {
     throw new Error(`页面不存在: ${input.slug}`);
@@ -136,8 +138,8 @@ export async function updateWikiPageMetadata(
     }
   }
 
-  const oldFilePath = getWikiPageFilePath(target.section, target.file);
-  const newFilePath = getWikiPageFilePath(nextSection, target.file);
+  const oldFilePath = getWikiPageFilePath(target.section, target.file, projectRoot);
+  const newFilePath = getWikiPageFilePath(nextSection, target.file, projectRoot);
 
   if (sectionChanged && (await fileExists(oldFilePath))) {
     await ensureDir(dirname(newFilePath));
@@ -155,7 +157,8 @@ export async function updateWikiPageMetadata(
 
   try {
     await mutateWikiBlueprint((pages) =>
-      pages.map((p) => (p.slug === target.slug ? updatedPage : p))
+      pages.map((p) => (p.slug === target.slug ? updatedPage : p)),
+      projectRoot,
     );
   } catch (err: unknown) {
     // best-effort 回滚文件搬移，不掩盖原始错误

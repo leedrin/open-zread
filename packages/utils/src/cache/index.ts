@@ -3,8 +3,8 @@ import type { FileManifest, CacheManifest } from '@open-zread/types';
 import { getCacheDir, readJsonFile, writeJsonFile, ensureDir } from '../file-io.js';
 import { CACHE_FILES, CACHE_VERSION } from './constants';
 
-export async function loadCachedManifest(): Promise<CacheManifest | null> {
-  const cacheDir = getCacheDir();
+export async function loadCachedManifest(projectRoot?: string): Promise<CacheManifest | null> {
+  const cacheDir = getCacheDir(projectRoot);
   const manifestPath = join(cacheDir, CACHE_FILES.manifest);
 
   try {
@@ -14,8 +14,8 @@ export async function loadCachedManifest(): Promise<CacheManifest | null> {
   }
 }
 
-export async function saveCachedManifest(manifest: FileManifest): Promise<void> {
-  const cacheDir = getCacheDir();
+export async function saveCachedManifest(manifest: FileManifest, projectRoot?: string): Promise<void> {
+  const cacheDir = getCacheDir(projectRoot);
   await ensureDir(cacheDir);
 
   const cacheManifest: CacheManifest = {

@@ -9,12 +9,15 @@ const CURRENT_DIR = joinPath(WIKI_DIR, 'current');
 const ARCHIVED_DIR = joinPath(WIKI_DIR, 'archived');
 
 export class WikiStore {
+  private projectRoot: string;
   private currentDir: string;
   private archivedDir: string;
 
-  constructor() {
-    this.currentDir = join(getProjectRoot(), CURRENT_DIR);
-    this.archivedDir = join(getProjectRoot(), ARCHIVED_DIR);
+  constructor(projectRoot?: string) {
+    const root = getProjectRoot(projectRoot);
+    this.projectRoot = root;
+    this.currentDir = join(root, CURRENT_DIR);
+    this.archivedDir = join(root, ARCHIVED_DIR);
   }
 
   async writePage(page: WikiPage, content: string): Promise<string> {
@@ -34,7 +37,7 @@ export class WikiStore {
   }
 
   async createSnapshot(): Promise<string> {
-    return createVersionSnapshot();
+    return createVersionSnapshot(this.projectRoot);
   }
 
   /**
@@ -44,7 +47,7 @@ export class WikiStore {
     const sourcePath = join(this.currentDir, page.file);
     if (!existsSync(sourcePath)) return null;
 
-    const snapshotName = generateSnapshotName();
+    const snapshotName = generateSnapshotName(this.projectRoot);
     const targetDir = join(this.archivedDir, snapshotName, page.section);
     mkdirSync(targetDir, { recursive: true });
 

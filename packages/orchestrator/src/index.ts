@@ -21,6 +21,15 @@ export type { AppendTopicResult, UpdateTopicAssociatedFilesResult } from './orch
 export { regenerateWikiPageSection } from './wiki/regenerate-section.js'
 export type { RegenerateSectionResult } from './wiki/regenerate-section.js'
 
+// Explicit project-scoped application service
+export { createOpenZreadApplication } from './application/index.js'
+export type {
+  OpenZreadApplication,
+  OpenZreadApplicationDependencies,
+  OpenZreadProjectContext,
+  OpenZreadProjectIndex,
+} from './application/index.js'
+
 // Types
 export * from './types.js'
 

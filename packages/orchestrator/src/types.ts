@@ -50,6 +50,11 @@ export interface BlueprintOptions {
   debug?: boolean;
 }
 
+/** 目录生成入口选项；projectRoot 用于隔离不同项目的文件、缓存和 Agent cwd。 */
+export interface GenerateWikiCatalogOptions extends BlueprintOptions {
+  onEvent?: (event: CatalogEvent) => void;
+}
+
 /**
  * Catalog generation event (for streaming progress)
  *

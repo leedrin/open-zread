@@ -7,16 +7,16 @@ const WIKI_DIR = '.open-zread/wiki';
 const CURRENT_DIR = joinPath(WIKI_DIR, 'current');
 const VERSIONS_DIR = joinPath(WIKI_DIR, 'versions');
 
-export function generateSnapshotName(): string {
+export function generateSnapshotName(projectRoot?: string): string {
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);
   const timeStr = now.toISOString().slice(11, 16).replace(':', '');
 
   let commitHash: string;
   try {
-    const projectRoot = getProjectRoot();
+    const root = getProjectRoot(projectRoot);
     commitHash = execSync('git rev-parse --short HEAD', {
-      cwd: projectRoot,
+      cwd: root,
       encoding: 'utf-8',
     }).trim();
   } catch {
@@ -26,14 +26,15 @@ export function generateSnapshotName(): string {
   return `${dateStr}_${timeStr}_${commitHash}`;
 }
 
-export async function createVersionSnapshot(): Promise<string> {
-  const currentPath = join(getProjectRoot(), CURRENT_DIR);
+export async function createVersionSnapshot(projectRoot?: string): Promise<string> {
+  const root = getProjectRoot(projectRoot);
+  const currentPath = join(root, CURRENT_DIR);
   if (!existsSync(currentPath)) {
     return '';
   }
 
-  const snapshotName = generateSnapshotName();
-  const versionsPath = join(getProjectRoot(), VERSIONS_DIR);
+  const snapshotName = generateSnapshotName(root);
+  const versionsPath = join(root, VERSIONS_DIR);
   const snapshotPath = join(versionsPath, snapshotName);
 
   await ensureDir(versionsPath);

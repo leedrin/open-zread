@@ -30,9 +30,9 @@ export const GetDirectoryTreeTool: ToolDefinition = {
   async prompt() {
     return 'Get project directory tree structure.';
   },
-  async call(_input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+  async call(_input: ToolInputParams, context: ToolContext): Promise<ToolResult> {
     try {
-      const symbols = await loadCachedSymbols();
+      const symbols = await loadCachedSymbols(context.cwd);
 
       if (!symbols || symbols.symbols.length === 0) {
         return {
@@ -86,9 +86,9 @@ export const GetCoreSignaturesTool: ToolDefinition = {
   async prompt() {
     return 'Get core file signatures.';
   },
-  async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+  async call(input: ToolInputParams, context: ToolContext): Promise<ToolResult> {
     try {
-      const symbols = await loadCachedSymbols();
+      const symbols = await loadCachedSymbols(context.cwd);
 
       if (!symbols || symbols.symbols.length === 0) {
         return {
@@ -149,10 +149,10 @@ export const GetModuleDetailsTool: ToolDefinition = {
   async prompt() {
     return 'Get detailed module repo map.';
   },
-  async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+  async call(input: ToolInputParams, context: ToolContext): Promise<ToolResult> {
     try {
       const modulePath = input.modulePath as string;
-      const symbols = await loadCachedSymbols();
+      const symbols = await loadCachedSymbols(context.cwd);
 
       if (!symbols || symbols.symbols.length === 0) {
         return {

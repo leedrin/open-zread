@@ -24,7 +24,8 @@ import { buildDirectoryTree, formatRepoMap, buildRepoMapOutput, trimSignature } 
  */
 export async function buildRepoMap(
   symbols: SymbolManifest,
-  options?: Partial<RepoMapOptions>
+  options?: Partial<RepoMapOptions>,
+  projectRoot?: string,
 ): Promise<RepoMapOutput> {
   logger.progress('Building Repo Map');
 
@@ -61,7 +62,7 @@ export async function buildRepoMap(
   );
 
   // Save Repo Map to cache directory
-  const cacheDir = getCacheDir();
+  const cacheDir = getCacheDir(projectRoot);
   const repoMapPath = join(cacheDir, 'repo-map.txt');
   await writeTextFile(repoMapPath, content);
 

@@ -10,10 +10,10 @@
  * 流程：外部调用 initialize() → 外部调用 start() → 并行生成各页面
  */
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useMemo } from "react";
 import { useImmer } from "use-immer";
 import { loadConfig, getWikiDir, joinPath, fileExists } from "@open-zread/utils";
-import { generateWikiContent, type ArticleEventPayload } from "@open-zread/orchestrator";
+import { createOpenZreadApplication, type ArticleEventPayload } from "@open-zread/orchestrator";
 import { articleEventToState } from "../mapper";
 import { createInitialArticlesState } from "../state";
 import type { ArticlesState, WikiPage, PageStatus } from "../types";
@@ -55,6 +55,7 @@ export function useArticlesGenerate({
   );
   const isGenerating = useRef(false);
   const isInitialized = useRef(false);
+  const application = useMemo(() => createOpenZreadApplication(process.cwd()), []);
 
   /**
    * 初始化：检测已存在文档并设置状态
@@ -66,7 +67,7 @@ export function useArticlesGenerate({
     if (pages.length === 0 || isInitialized.current) return [];
     isInitialized.current = true;
 
-    const wikiDir = getWikiDir();
+    const wikiDir = getWikiDir(application.projectRoot);
     const existingSlugs: string[] = [];
 
     for (const page of pages) {
@@ -97,7 +98,7 @@ export function useArticlesGenerate({
 
     // 返回待生成的 pages 列表（避免闭包陷阱）
     return pages.filter((page) => !existingSlugs.includes(page.slug));
-  }, [pages, updateState]);
+  }, [application, pages, updateState]);
 
   /**
    * 事件回调
@@ -139,7 +140,7 @@ export function useArticlesGenerate({
 
 
     try {
-      await generateWikiContent({
+      await application.generateWikiContent({
         pages: pendingPages,
         maxConcurrent: concurrent,
         onEvent: handleEvent,
@@ -155,7 +156,7 @@ export function useArticlesGenerate({
     } finally {
       isGenerating.current = false;
     }
-  }, [handleEvent, onComplete]);
+  }, [application, handleEvent, onComplete]);
 
   /**
    * 重新生成单篇文章
@@ -194,7 +195,7 @@ export function useArticlesGenerate({
 
       // 启动生成
       try {
-        await generateWikiContent({
+        await application.generateWikiContent({
           pages: [page],
           maxConcurrent: concurrent,
           onEvent: handleEvent,
@@ -208,7 +209,7 @@ export function useArticlesGenerate({
         });
       }
     },
-    [pages, updateState, handleEvent]
+    [application, pages, updateState, handleEvent]
   );
 
   /**
@@ -227,7 +228,7 @@ export function useArticlesGenerate({
       if (!isInitialized.current) return;
 
       const currentSlugs = new Set(currentPages.map((p) => p.slug));
-      const wikiDir = getWikiDir();
+      const wikiDir = getWikiDir(application.projectRoot);
 
       const statusesToAdd: Record<string, PageStatus> = {};
       for (const page of currentPages) {
@@ -254,7 +255,7 @@ export function useArticlesGenerate({
         draft.pendingCount = currentPages.length - draft.completedCount - draft.failedCount;
       });
     },
-    [updateState]
+    [application, updateState]
   );
 
   return {

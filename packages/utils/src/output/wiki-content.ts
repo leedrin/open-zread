@@ -5,7 +5,7 @@
  */
 
 import { readFile } from 'fs/promises';
-import { join } from 'path';
+import { isAbsolute, join, resolve } from 'path';
 import type { WikiOutput, WikiPage, AppConfig, TechStackSummary } from '@open-zread/types';
 import { getWikiDir, getWikiJsonPath, writeJsonFile } from '../file-io.js';
 import { logger } from '../logger.js';
@@ -27,7 +27,8 @@ function generateWikiId(): string {
 export async function generateWikiJson(
   pages: WikiPage[],
   config: AppConfig,
-  techStackSummary?: TechStackSummary
+  techStackSummary?: TechStackSummary,
+  projectRoot?: string,
 ): Promise<string> {
   const wikiOutput: WikiOutput = {
     id: generateWikiId(),
@@ -37,7 +38,7 @@ export async function generateWikiJson(
     techStackSummary,
   };
 
-  const outputPath = getWikiJsonPath();
+  const outputPath = getWikiJsonPath(projectRoot);
   await writeJsonFile(outputPath, wikiOutput);
 
   logger.success(`Blueprint generated: ${outputPath}`);
@@ -53,9 +54,11 @@ export async function generateWikiJson(
  * @returns WikiOutput with pages array
  * @throws Error if blueprint not found or invalid structure
  */
-export async function loadWikiBlueprint(path?: string): Promise<WikiOutput> {
-  const wikiDir = getWikiDir();
-  const blueprintPath = path ?? join(wikiDir, DEFAULT_BLUEPRINT_FILE);
+export async function loadWikiBlueprint(path?: string, projectRoot?: string): Promise<WikiOutput> {
+  const wikiDir = getWikiDir(projectRoot);
+  const blueprintPath = path
+    ? (isAbsolute(path) ? path : resolve(projectRoot ?? process.cwd(), path))
+    : join(wikiDir, DEFAULT_BLUEPRINT_FILE);
 
   try {
     const content = await readFile(blueprintPath, 'utf-8');

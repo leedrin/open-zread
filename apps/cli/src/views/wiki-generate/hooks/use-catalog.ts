@@ -9,11 +9,10 @@
  * 流程：扫描文件 → 解析文件 → 保存缓存 → Agent 生成
  */
 
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useRef, useEffect, useMemo } from "react";
 import { useImmer } from "use-immer";
-import { scanFiles, parseFiles } from "@open-zread/repo-analyzer";
-import { saveCachedSymbols, saveCachedManifest, removeDir, getWikiDir, getWikiJsonPath } from "@open-zread/utils";
-import { generateWikiCatalog, type CatalogEvent } from "@open-zread/orchestrator";
+import { removeDir, getWikiDir, getWikiJsonPath } from "@open-zread/utils";
+import { createOpenZreadApplication, type CatalogEvent } from "@open-zread/orchestrator";
 import { catalogEventToState } from "../mapper";
 import { initialCatalogState } from "../state";
 import type { CatalogState, CatalogEventPayload } from "../types";
@@ -50,6 +49,7 @@ export function useCatalogGenerate({
 }: UseCatalogGenerateOptions): UseCatalogGenerateReturn {
   const [state, updateState] = useImmer<CatalogState>(initialCatalogState);
   const isGenerating = useRef(false);
+  const application = useMemo(() => createOpenZreadApplication(process.cwd()), []);
 
 
 
@@ -118,9 +118,9 @@ export function useCatalogGenerate({
     if (forceRegenerate) {
       try {
         // 删除 wiki 目录
-        await removeDir(getWikiDir());
+        await removeDir(getWikiDir(application.projectRoot));
         // 删除 wiki.json
-        await removeDir(getWikiJsonPath());
+        await removeDir(getWikiJsonPath(application.projectRoot));
       } catch (_err: unknown) {
         // 忽略删除错误（文件不存在等）
       }
@@ -132,25 +132,8 @@ export function useCatalogGenerate({
     });
 
     try {
-      // Phase 1-2: 扫描 + 解析
-      const manifest = await scanFiles();
-      if (manifest.files.length === 0) {
-        updateState((draft) => {
-          draft.status = "failed";
-          draft.error = "No files found";
-        });
-        return;
-      }
-
-      // 保存文件清单缓存（用于后续增量更新）
-      await saveCachedManifest(manifest);
-
-      const symbols = await parseFiles(manifest);
-      await saveCachedSymbols(symbols);
-
-
-      // Phase 3: 调用 Agent
-      await generateWikiCatalog(handleAgentEvent);
+      // 扫描、解析、缓存和 Agent 生成均通过显式项目服务执行。
+      await application.generateWikiCatalog(handleAgentEvent);
 
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -161,7 +144,7 @@ export function useCatalogGenerate({
     } finally {
       isGenerating.current = false;
     }
-  }, [forceRegenerate, updateState, handleAgentEvent]);
+  }, [application, forceRegenerate, updateState, handleAgentEvent]);
 
   /**
    * 重试

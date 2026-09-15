@@ -113,6 +113,8 @@ export interface ArticleEventPayload {
  * Generate Wiki Content Options
  */
 export interface GenerateWikiOptions {
+  /** 项目根目录；不传时保持使用当前进程目录 */
+  projectRoot?: string;
   /** Blueprint file path (default: .open-zread/wiki/wiki.json) */
   blueprintPath?: string;
   /** 待生成的页面列表（如果传入，则不从 blueprint 加载，只生成这些页面） */

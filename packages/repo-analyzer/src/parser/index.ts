@@ -245,10 +245,10 @@ function extractBasic(tree: Parser.Tree): { imports: string[]; exports: string[]
 async function parseFile(
   filePath: string,
   language: string,
-  parsers: Map<string, Parser>
+  parsers: Map<string, Parser>,
+  projectRoot?: string,
 ): Promise<SymbolInfo | null> {
-  const projectRoot = getProjectRoot();
-  const fullPath = join(projectRoot, filePath);
+  const fullPath = join(getProjectRoot(projectRoot), filePath);
   const source = await readTextFile(fullPath);
 
   const parser = parsers.get(language);
@@ -284,7 +284,7 @@ async function parseFile(
   };
 }
 
-export async function parseFiles(manifest: FileManifest): Promise<SymbolManifest> {
+export async function parseFiles(manifest: FileManifest, projectRoot?: string): Promise<SymbolManifest> {
   logger.progress('Loading parsers');
 
   const languages = [...new Set(manifest.files.map(f => f.language))];
@@ -306,7 +306,7 @@ export async function parseFiles(manifest: FileManifest): Promise<SymbolManifest
     }
 
     try {
-      const symbolInfo = await parseFile(file.path, file.language, parsers);
+      const symbolInfo = await parseFile(file.path, file.language, parsers, projectRoot);
       if (symbolInfo) {
         symbols.push(symbolInfo);
       }

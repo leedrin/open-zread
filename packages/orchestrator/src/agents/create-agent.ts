@@ -26,6 +26,8 @@ export interface CreateBlueprintAgentOptions {
   maxTurns?: number;
   /** 进度回调（可选） */
   onEvent?: (event: CatalogEvent) => void;
+  /** Agent 工作目录；不传时保持使用当前进程目录 */
+  projectRoot?: string;
 }
 
 /**
@@ -129,7 +131,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     apiKey,
     baseURL,
     providerId,
-    cwd: process.cwd(),
+    cwd: options.projectRoot ?? process.cwd(),
     tools: options.tools,
     systemPrompt: SYSTEM_PROMPTS[docLanguage],
     maxTurns: options?.maxTurns ?? 30,

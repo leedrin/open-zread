@@ -48,9 +48,10 @@ function buildSectionRewritePrompt(page: WikiPage, oldContent: string, instructi
 export async function regenerateWikiPageSection(
   page: WikiPage,
   instruction: string,
-  onEvent?: (event: CatalogEvent) => void
+  onEvent?: (event: CatalogEvent) => void,
+  projectRoot?: string,
 ): Promise<RegenerateSectionResult> {
-  const wikiDir = getWikiDir();
+  const wikiDir = getWikiDir(projectRoot);
   const filePath = joinPath(wikiDir, page.section, page.file);
 
   if (!(await fileExists(filePath))) {
@@ -64,6 +65,7 @@ export async function regenerateWikiPageSection(
     prompts: buildSectionRewritePrompt(page, oldContent, instruction),
     maxTurns: 30,
     onEvent,
+    projectRoot,
   });
 
   return {

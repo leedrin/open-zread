@@ -12,8 +12,8 @@ const SYMBOL_CACHE_FILE = 'last_symbols.json';
 /**
  * Save SymbolManifest to cache
  */
-export async function saveCachedSymbols(symbols: SymbolManifest): Promise<void> {
-  const cacheDir = getCacheDir();
+export async function saveCachedSymbols(symbols: SymbolManifest, projectRoot?: string): Promise<void> {
+  const cacheDir = getCacheDir(projectRoot);
   await ensureDir(cacheDir);
 
   const cachePath = join(cacheDir, SYMBOL_CACHE_FILE);
@@ -31,8 +31,8 @@ export async function saveCachedSymbols(symbols: SymbolManifest): Promise<void> 
 /**
  * Load cached SymbolManifest
  */
-export async function loadCachedSymbols(): Promise<SymbolManifest | null> {
-  const cacheDir = getCacheDir();
+export async function loadCachedSymbols(projectRoot?: string): Promise<SymbolManifest | null> {
+  const cacheDir = getCacheDir(projectRoot);
   const cachePath = join(cacheDir, SYMBOL_CACHE_FILE);
 
   try {

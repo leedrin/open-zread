@@ -27,6 +27,11 @@ import type { SyncDiff } from '@open-zread/types';
 import type { CatalogEvent } from '../types.js';
 import type { TokenUsage } from '@open-zread/agent-sdk';
 
+export interface SyncOptions {
+  projectRoot?: string;
+  onEvent?: (event: CatalogEvent) => void;
+}
+
 /** Sync Agent 工具列表 */
 const SYNC_TOOLS = [
   GetDirectoryTreeTool,
@@ -57,18 +62,23 @@ export interface SyncResult {
  * @returns SyncDiff containing new/updated/archived pages
  */
 export async function syncWiki(
-  onEvent?: (event: CatalogEvent) => void
+  onEventOrOptions?: ((event: CatalogEvent) => void) | SyncOptions,
 ): Promise<SyncResult> {
+  const options = typeof onEventOrOptions === 'function'
+    ? { onEvent: onEventOrOptions }
+    : onEventOrOptions;
+  const projectRoot = options?.projectRoot;
+  const onEvent = options?.onEvent;
   const startTime = Date.now();
 
   // ——— 阶段1: 检测 ———
   onEvent?.({ type: 'scanning' });
 
   const [currentManifest, cachedManifest, oldWikiJson] = await Promise.all([
-    scanFiles(),
-    loadCachedManifest(),
+    scanFiles(projectRoot),
+    loadCachedManifest(projectRoot),
     (async () => {
-      try { return await loadWikiBlueprint(); } catch { return null; }
+      try { return await loadWikiBlueprint(undefined, projectRoot); } catch { return null; }
     })(),
   ]);
 
@@ -101,10 +111,10 @@ export async function syncWiki(
 
   // 解析 + 保存缓存
   onEvent?.({ type: 'parsing' });
-  const symbols = await parseFiles(currentManifest);
+  const symbols = await parseFiles(currentManifest, projectRoot);
   await Promise.all([
-    saveCachedManifest(currentManifest),
-    saveCachedSymbols(symbols),
+    saveCachedManifest(currentManifest, projectRoot),
+    saveCachedSymbols(symbols, projectRoot),
   ]);
 
   // ——— 阶段2: 规划 ———
@@ -117,10 +127,11 @@ export async function syncWiki(
       SyncCatalogPrompt as string,
     ].join('\n\n'),
     onEvent,
+    projectRoot,
   });
 
   // 加载新生成的 wiki.json
-  const newWikiJson = await loadWikiBlueprint();
+  const newWikiJson = await loadWikiBlueprint(undefined, projectRoot);
 
   // 对比新旧 wiki.json，产出 SyncDiff
   const syncDiff: SyncDiff = {
