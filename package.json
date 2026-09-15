@@ -13,7 +13,8 @@
     "changeset": "bunx @changesets/cli",
     "version": "bunx @changesets/cli version",
     "release": "bunx @changesets/cli publish",
-    "build:exe": "bun run scripts/build-exe.ts"
+    "build:exe": "bun run scripts/build-exe.ts",
+    "validate:zread-contract": "bun run scripts/validate-zread-contract.ts"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",

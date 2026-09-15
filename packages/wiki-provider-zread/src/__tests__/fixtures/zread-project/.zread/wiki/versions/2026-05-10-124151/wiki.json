@@ -1,0 +1,26 @@
+{
+  "id": "2026-05-10-124151",
+  "generated_at": "2026-05-10T04:41:51.7395171Z",
+  "language": "zh",
+  "providerMeta": {
+    "opaque": "keep-me"
+  },
+  "pages": [
+    {
+      "slug": "project-overview",
+      "title": "项目概览",
+      "file": "project-overview.md",
+      "section": "入门指南",
+      "level": "Beginner"
+    },
+    {
+      "slug": "protocol-integration",
+      "title": "协议集成",
+      "file": "protocol-integration.md",
+      "section": "核心框架",
+      "group": "网络通信",
+      "level": "Intermediate",
+      "sourceRefs": ["src/protocol.ts"]
+    }
+  ]
+}
