@@ -1,0 +1,32 @@
+{
+  "name": "hub",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 1420",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "typecheck": "tsc -b --noEmit",
+    "test": "bun test",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "@open-zread/hub-contract": "workspace:*",
+    "@tauri-apps/api": "^2.5.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/react-test-renderer": "^19.1.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "react-test-renderer": "^19.2.5",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.10"
+  }
+}

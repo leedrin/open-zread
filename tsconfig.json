@@ -29,6 +29,9 @@
       "@open-zread/orchestrator": [
         "./packages/orchestrator/src/index.ts"
       ],
+      "@open-zread/hub-contract": [
+        "./packages/hub-contract/src/index.ts"
+      ],
       "@open-zread/wiki-provider-zread": [
         "./packages/wiki-provider-zread/src/index.ts"
       ]

@@ -1,0 +1,92 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #292725;
+  background: #f6f5f4;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; min-width: 960px; min-height: 100vh; }
+
+button { font: inherit; }
+
+.hub-shell {
+  width: min(1180px, calc(100% - 96px));
+  margin: 0 auto;
+  padding: 56px 0 72px;
+}
+
+.hub-header, .health-heading { display: flex; align-items: center; justify-content: space-between; }
+
+.hub-header { margin-bottom: 56px; }
+
+.eyebrow {
+  margin: 0 0 10px;
+  color: #8a817a;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .16em;
+}
+
+h1, h2, h3, p { margin-top: 0; }
+h1 { margin-bottom: 0; font-size: 34px; letter-spacing: -.04em; }
+h2 { max-width: 580px; margin-bottom: 18px; font-size: clamp(36px, 5vw, 68px); line-height: .98; letter-spacing: -.065em; }
+h3 { margin-bottom: 8px; font-size: 16px; }
+
+.runtime-chip {
+  border: 1px solid rgba(41, 39, 37, .12);
+  border-radius: 999px;
+  padding: 9px 14px;
+  color: #6f6964;
+  background: rgba(255, 255, 255, .58);
+  font-size: 12px;
+}
+
+.hero-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 64px;
+  align-items: end;
+  border-radius: 24px;
+  padding: 56px;
+  background: #fff;
+  box-shadow: 0 18px 60px rgba(42, 37, 31, .08);
+}
+
+.hero-copy { max-width: 520px; color: #746d67; font-size: 16px; line-height: 1.7; }
+
+.health-card, .surface-card {
+  border: 1px solid rgba(41, 39, 37, .1);
+  border-radius: 16px;
+  background: #faf9f8;
+}
+
+.health-card { padding: 22px; }
+.health-heading { justify-content: flex-start; gap: 9px; }
+.health-heading h3 { margin: 0; }
+.status-dot { width: 9px; height: 9px; border-radius: 50%; background: #b6aea8; }
+.status-healthy { background: #2c9b63; }
+.status-degraded { background: #d99a26; }
+.status-unavailable { background: #c45050; }
+.status-checking { background: #8c95c7; }
+.service-status { margin: 14px 0 18px; color: #2c9b63; font-size: 24px; font-weight: 650; text-transform: capitalize; }
+.health-details { display: grid; gap: 9px; margin: 0 0 20px; }
+.health-details div { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; }
+.health-details dt { color: #918982; }
+.health-details dd { margin: 0; color: #4d4844; font-weight: 600; }
+.error-message { color: #b34949; font-size: 13px; line-height: 1.45; }
+.secondary-button { border: 1px solid rgba(41, 39, 37, .16); border-radius: 9px; padding: 9px 12px; color: #4d4844; background: #fff; cursor: pointer; }
+.secondary-button:hover { border-color: rgba(41, 39, 37, .3); background: #f3f1ef; }
+
+.surface-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
+.surface-card { min-height: 170px; padding: 24px; background: rgba(255, 255, 255, .65); }
+.surface-number { display: block; margin-bottom: 32px; color: #a09891; font-size: 12px; font-weight: 700; }
+.surface-card p { margin-bottom: 0; color: #827a74; font-size: 14px; line-height: 1.55; }
+.task-event { margin-top: 14px !important; color: #2c9b63 !important; font-size: 12px !important; font-weight: 650; }
+
+@media (max-width: 1020px) {
+  .hub-shell { width: min(900px, calc(100% - 48px)); }
+  .hero-card { grid-template-columns: 1fr; gap: 32px; padding: 40px; }
+}
