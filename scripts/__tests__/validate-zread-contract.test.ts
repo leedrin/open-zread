@@ -24,6 +24,20 @@ describe('validate:zread-contract arguments', () => {
       .toBe(expected);
   });
 
+  test('accepts a verified native Zread executable directly on Windows', () => {
+    const executable = 'F:\\tools\\zread.exe';
+    expect(preferNativeZreadExecutable(executable, 'win32', (path) => path === executable))
+      .toBe(executable);
+  });
+
+  test.each(['zread.cmd', 'zread.ps1', 'zread', 'F:\\tools\\missing.exe'])(
+    'rejects an unresolved or non-native Windows command %s',
+    (path) => {
+      expect(() => preferNativeZreadExecutable(path, 'win32', () => false))
+        .toThrow('zread.exe');
+    },
+  );
+
   test('keeps a discovered executable when no verified native replacement exists', () => {
     expect(preferNativeZreadExecutable('/usr/local/bin/zread', 'linux', () => false))
       .toBe('/usr/local/bin/zread');

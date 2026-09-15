@@ -129,6 +129,21 @@ describe('Zread native integration contract', () => {
     expect(result.diagnostics).toEqual(['write error: cannot rotate log']);
   });
 
+  test('does not claim structured progress for an unverified Zread version', async () => {
+    const run: ZreadCommandRunner = async (_executable, args) => ({
+      exitCode: 0,
+      stdout: args[0] === 'version'
+        ? '{"vm":{"version":"0.2.14","channel":"npm","go_version":"go1.26.0","os":"windows","arch":"amd64"}}\n'
+        : ['Generate wiki documentation', '--stdio', '--yes', '--draft', '--skip-failed', 'Login flow', '--custom', 'Update Zread to the latest version'].join('\n'),
+      stderr: '',
+    });
+
+    const result = await inspectZreadCli({ executable: 'zread.exe', run });
+
+    expect(result.capabilities.machineReadable).toBe(true);
+    expect(result.capabilities.structuredProgress).toBe(false);
+  });
+
   test('normalizes machine-readable VM snapshots into progress records', () => {
     const progress = parseZreadProgress([
       JSON.stringify({
@@ -140,6 +155,7 @@ describe('Zread native integration contract', () => {
         waiting_for: ['quit'],
       }),
       JSON.stringify({ done: true }),
+      JSON.stringify({ unexpected: true }),
     ].join('\n'));
 
     expect(progress).toEqual([
@@ -253,8 +269,37 @@ describe('Zread native integration contract', () => {
       expect(result.previousPointer).toBe('versions/2026-05-10-124151');
       expect(result.currentPointer).toBe(nextPointer);
       expect(result.progress).toEqual([{ done: true, waitingFor: [] }]);
+      expect(result.oldVersionPreserved).toBe(true);
       expect(readFileSync(join(oldVersionPath, 'wiki.json')).equals(oldCatalogBefore)).toBe(true);
       expect(readFileSync(join(oldVersionPath, 'project-overview.md')).equals(oldPageBefore)).toBe(true);
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects generation success when the previous native version is modified', async () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'zread-preservation-contract-'));
+    cpSync(fixtureRoot, temporaryRoot, { recursive: true });
+    const wikiRoot = join(temporaryRoot, '.zread', 'wiki');
+    const oldVersionPath = join(wikiRoot, 'versions', '2026-05-10-124151');
+    const nextPointer = 'versions/2026-09-15-230000';
+    const run: ZreadCommandRunner = async () => {
+      cpSync(oldVersionPath, join(wikiRoot, nextPointer), { recursive: true });
+      writeFileSync(join(wikiRoot, 'current'), `${nextPointer}\n`);
+      writeFileSync(join(oldVersionPath, 'project-overview.md'), '# 被破坏\n');
+      return { exitCode: 0, stdout: '{"done":true}\n', stderr: '' };
+    };
+
+    try {
+      const result = await probeZreadGeneration({
+        executable: 'zread.exe',
+        projectRoot: temporaryRoot,
+        run,
+      });
+
+      expect(result.status).toBe('previous_version_modified');
+      expect(result.outputValidated).toBe(false);
+      expect(result.oldVersionPreserved).toBe(false);
     } finally {
       rmSync(temporaryRoot, { recursive: true, force: true });
     }

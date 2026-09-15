@@ -26,7 +26,7 @@ npm 包中的实际 Windows 二进制为：
 C:\Users\Administrator\AppData\Roaming\npm\node_modules\zread_cli\node_modules\@zread\cli-win32-x64\zread.exe
 ```
 
-Windows 调用和取消必须针对实际 `zread.exe`。验证脚本会在该已验证的 npm 安装布局中优先解析真实二进制，避免只终止 `.cmd` 后遗留生成子进程；Hub 产品运行时也只调用外部原生 exe，不把 npm wrapper 当作 Provider 进程。
+Windows 调用和取消必须针对存在的实际 `zread.exe`。验证脚本会在该已验证的 npm 安装布局中优先解析真实二进制；若最终路径不是 `.exe`、文件不存在或只发现无法解析的 `.cmd/.ps1` wrapper，会直接报告不可用，避免终止 wrapper 后遗留生成子进程。Hub 产品运行时也只调用外部原生 exe，不把 npm wrapper 当作 Provider 进程。
 
 版本探测必须使用 `zread version --stdio`，不是 `zread --version`。机器可读结果包含版本、channel、Go 版本、操作系统与架构。
 
@@ -47,7 +47,7 @@ Windows 调用和取消必须针对实际 `zread.exe`。验证脚本会在该已
 | 完整生成 | `zread generate --stdio --yes` | 可用 |
 | 草稿处理 | `zread generate --draft <resume|clear|cancel>` | CLI 已公开 |
 | 跳过失败页 | `zread generate --skip-failed` | CLI 已公开 |
-| 结构化进度 | `zread generate --stdio --yes` 的逐行 JSON VM 快照 | 可用 |
+| 结构化进度 | `zread generate --stdio --yes` 的逐行 JSON VM 快照 | 已验证 v0.2.13 可用；其他版本默认不可用 |
 | CLI 自更新 | `zread update --stdio` | 可用，仅更新 CLI |
 | Wiki 增量更新 | 无 | 不可用 |
 | Sync / Overlay | 无 | 不可用，不得模拟 |
@@ -78,7 +78,7 @@ Zread `0.2.13` 在 `--stdio` 模式下逐行输出 JSON VM 快照。真实取消
 - `vm.pages.done`、`total`、`waiting_retry`：页面总体进度；
 - `waiting_for[]`：CLI 当前可接受的控制动作。
 
-适配器将每行解析为记录，并归一化为整体、catalog、页面计数、等待重试和等待动作字段；连续重复快照会被折叠。当前探针在进程结束后返回快照数组，实时流式回调由后续任务接入。
+适配器只接受带 `vm` 或完成标志的事件，并归一化为整体、catalog、页面计数、等待重试和等待动作字段；其他 JSON 对象会被忽略，连续重复快照会被折叠。当前探针在进程结束后返回快照数组，实时流式回调由后续任务接入。结构化进度能力仅对本次实测的 v0.2.13 开启，未知版本默认关闭。
 
 ## 真实生成与退出行为
 
@@ -112,7 +112,7 @@ Zread `0.2.13` 在 `--stdio` 模式下逐行输出 JSON VM 快照。真实取消
 - 退出码为 0 但既有 `current` 未改变，归类为 `unchanged_output`，不得复用旧产物冒充成功；
 - 只有 `succeeded` 才允许 `outputValidated: true`。
 
-切换版本的契约测试保留旧版本目录，仅更新 `current` 指针，并对旧 catalog 与页面执行切换前后字节比较，证明旧版本内容不被覆盖。
+生成探针会在运行前记录旧 catalog 与全部旧页面的组合哈希，切换后重新计算；任何文件缺失或字节变化都会返回 `previous_version_modified`，不得报告成功。契约测试同时覆盖旧版本完整保留和旧页面被改坏两条路径。
 
 ## 可复现验证
 

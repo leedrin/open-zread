@@ -58,7 +58,7 @@ export interface ZreadCliInspection {
     existingDraftActions: boolean;
     skipFailedPages: boolean;
     cliSelfUpdate: boolean;
-    structuredProgress: true;
+    structuredProgress: boolean;
     incrementalWikiUpdate: false;
   };
   diagnostics: string[];
@@ -91,12 +91,13 @@ export interface ProbeZreadGenerationOptions {
 }
 
 export interface ZreadGenerationProbe {
-  status: 'succeeded' | 'authentication_failed' | 'cancelled' | 'failed' | 'incomplete_output' | 'unchanged_output';
+  status: 'succeeded' | 'authentication_failed' | 'cancelled' | 'failed' | 'incomplete_output' | 'unchanged_output' | 'previous_version_modified';
   exitCode: number;
   previousPointer?: string;
   currentPointer?: string;
   outputValidated: boolean;
   versionChanged: boolean;
+  oldVersionPreserved?: boolean;
   progress: ZreadProgressSnapshot[];
   diagnostics: string[];
 }
@@ -182,20 +183,22 @@ export async function inspectZreadCli(options: InspectZreadCliOptions): Promise<
     throw new Error(`Zread update help failed with exit code ${updateHelp.exitCode}`);
   }
 
+  const version = parseVersionOutput(versionResult.stdout);
+  const machineReadable = generateHelp.stdout.includes('--stdio');
   return {
     status: 'available',
     executable: options.executable,
-    version: parseVersionOutput(versionResult.stdout),
+    version,
     capabilities: {
       login: loginHelp.stdout.includes('Login flow'),
       customApiKeyLogin: loginHelp.stdout.includes('--custom'),
       generate: generateHelp.stdout.includes('Generate wiki documentation'),
-      machineReadable: generateHelp.stdout.includes('--stdio'),
+      machineReadable,
       unattended: generateHelp.stdout.includes('--yes'),
       existingDraftActions: generateHelp.stdout.includes('--draft'),
       skipFailedPages: generateHelp.stdout.includes('--skip-failed'),
       cliSelfUpdate: updateHelp.stdout.includes('Update Zread to the latest version'),
-      structuredProgress: true,
+      structuredProgress: machineReadable && version.version === '0.2.13',
       incrementalWikiUpdate: false,
     },
     diagnostics: collectDiagnostics(
@@ -343,15 +346,18 @@ function parseZreadStdioEvents(stdout: string): ReadonlyArray<Readonly<Record<st
 }
 
 export function parseZreadProgress(stdout: string): ZreadProgressSnapshot[] {
-  const snapshots = parseZreadStdioEvents(stdout).map((event): ZreadProgressSnapshot => {
+  const snapshots = parseZreadStdioEvents(stdout).flatMap((event): ZreadProgressSnapshot[] => {
     const vm = isRecord(event.vm) ? event.vm : undefined;
     const catalog = vm && isRecord(vm.catalog) ? vm.catalog : undefined;
     const pages = vm && isRecord(vm.pages) ? vm.pages : undefined;
+    if (event.done !== true && !vm) {
+      return [];
+    }
     const waitingFor = Array.isArray(event.waiting_for)
       ? event.waiting_for.filter((value): value is string => typeof value === 'string')
       : [];
 
-    return {
+    return [{
       done: event.done === true,
       ...(typeof vm?.state === 'string' ? { state: vm.state } : {}),
       ...(typeof catalog?.status === 'string' ? { catalogStatus: catalog.status } : {}),
@@ -365,7 +371,7 @@ export function parseZreadProgress(stdout: string): ZreadProgressSnapshot[] {
         ? { waitingRetry: pages.waiting_retry }
         : {}),
       waitingFor,
-    };
+    }];
   });
 
   return snapshots.filter((snapshot, index) => (
@@ -373,10 +379,28 @@ export function parseZreadProgress(stdout: string): ZreadProgressSnapshot[] {
   ));
 }
 
+async function fingerprintVersion(wiki: ZreadWikiInspection): Promise<string> {
+  const paths = [wiki.catalogPath, ...wiki.pages.map((page) => page.absolutePath)].sort();
+  const entries = await Promise.all(paths.map(async (path) => ({
+    path: relative(wiki.versionPath, path),
+    hash: hashContent(await readFile(path)),
+  })));
+  return hashContent(Buffer.from(JSON.stringify(entries), 'utf8'));
+}
+
 export async function probeZreadGeneration(
   options: ProbeZreadGenerationOptions,
 ): Promise<ZreadGenerationProbe> {
-  const previousPointer = await readCurrentPointer(options.projectRoot);
+  let previousWiki: ZreadWikiInspection | undefined;
+  try {
+    previousWiki = await inspectZreadWiki(options.projectRoot);
+  } catch {
+    previousWiki = undefined;
+  }
+  const previousPointer = previousWiki?.currentPointer;
+  const previousFingerprint = previousWiki
+    ? await fingerprintVersion(previousWiki)
+    : undefined;
   const result = await options.run(
     options.executable,
     ['generate', '--stdio', '--yes'],
@@ -385,6 +409,14 @@ export async function probeZreadGeneration(
   const currentPointer = await readCurrentPointer(options.projectRoot);
   const output = `${result.stdout}\n${result.stderr}`;
   const progress = parseZreadProgress(result.stdout);
+  let oldVersionPreserved: boolean | undefined;
+  if (previousWiki && previousFingerprint && currentPointer !== previousPointer) {
+    try {
+      oldVersionPreserved = await fingerprintVersion(previousWiki) === previousFingerprint;
+    } catch {
+      oldVersionPreserved = false;
+    }
+  }
   let status: ZreadGenerationProbe['status'];
   if (result.cancelled) {
     status = 'cancelled';
@@ -396,6 +428,8 @@ export async function probeZreadGeneration(
     status = 'incomplete_output';
   } else if (previousPointer !== undefined && currentPointer === previousPointer) {
     status = 'unchanged_output';
+  } else if (oldVersionPreserved === false) {
+    status = 'previous_version_modified';
   } else {
     status = 'succeeded';
   }
@@ -407,6 +441,7 @@ export async function probeZreadGeneration(
     currentPointer,
     outputValidated: status === 'succeeded',
     versionChanged: currentPointer !== undefined && currentPointer !== previousPointer,
+    oldVersionPreserved,
     progress,
     diagnostics: collectDiagnostics(result.stderr),
   };

@@ -46,19 +46,24 @@ export function preferNativeZreadExecutable(
   platform = process.platform,
   fileExists: (path: string) => boolean = existsSync,
 ): string {
-  if (platform !== 'win32' || !discovered.toLowerCase().endsWith('.cmd')) {
+  if (platform !== 'win32') {
     return discovered;
   }
-  const candidate = join(
-    dirname(discovered),
-    'node_modules',
-    'zread_cli',
-    'node_modules',
-    '@zread',
-    'cli-win32-x64',
-    'zread.exe',
-  );
-  return fileExists(candidate) ? candidate : discovered;
+  const candidate = discovered.toLowerCase().endsWith('.cmd')
+    ? join(
+      dirname(discovered),
+      'node_modules',
+      'zread_cli',
+      'node_modules',
+      '@zread',
+      'cli-win32-x64',
+      'zread.exe',
+    )
+    : discovered;
+  if (!candidate.toLowerCase().endsWith('.exe') || !fileExists(candidate)) {
+    throw new Error('Windows requires an existing native zread.exe; pass --executable explicitly');
+  }
+  return candidate;
 }
 
 async function runZreadCommand(
@@ -98,7 +103,9 @@ async function main(): Promise<void> {
   }
 
   const projectRoot = readOption(args, '--project') ?? process.cwd();
-  const requestedExecutable = readOption(args, '--executable') ?? Bun.which('zread');
+  const requestedExecutable = readOption(args, '--executable')
+    ?? Bun.which('zread.exe')
+    ?? Bun.which('zread');
   if (!requestedExecutable) {
     throw new Error('Zread executable was not found; pass --executable explicitly');
   }
