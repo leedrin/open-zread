@@ -1,7 +1,8 @@
 use crate::contracts::{
-    CancelTaskResponse, HubCommandError, HubHealth, HubRunnerInfo, HubServiceHealth,
-    HubTaskEvent, TASK_EVENT,
+    CancelTaskResponse, HubCommandError, HubHealth, HubProject, HubRunnerInfo, HubServiceHealth,
+    HubTaskEvent, RegisterProjectResponse, TASK_EVENT,
 };
+use crate::projects::{list_projects, register_project};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -91,7 +92,8 @@ fn inspect_runner(app: &AppHandle) -> HubRunnerInfo {
     let executable = root.join(RUNNER_EXECUTABLE);
     let manifest = root.join(RUNNER_MANIFEST);
     let parsed_manifest = read_runner_manifest(&manifest);
-    let executable_version = executable.is_file()
+    let executable_version = executable
+        .is_file()
         .then(|| read_executable_version(&executable))
         .flatten();
     let available = is_runner_available(
@@ -102,7 +104,11 @@ fn inspect_runner(app: &AppHandle) -> HubRunnerInfo {
     );
 
     HubRunnerInfo {
-        status: if available { "available" } else { "unavailable" },
+        status: if available {
+            "available"
+        } else {
+            "unavailable"
+        },
         version: executable_version
             .or_else(|| manifest_version(parsed_manifest.as_ref()))
             .unwrap_or_else(|| "unknown".to_string()),
@@ -110,15 +116,13 @@ fn inspect_runner(app: &AppHandle) -> HubRunnerInfo {
     }
 }
 
-pub(crate) fn emit_task_event(
-    app: &AppHandle,
-    event: HubTaskEvent,
-) -> Result<(), HubCommandError> {
-    app.emit(TASK_EVENT, event).map_err(|error| HubCommandError {
-        code: "internal_error",
-        message: format!("Unable to publish task event: {error}"),
-        retryable: true,
-    })
+pub(crate) fn emit_task_event(app: &AppHandle, event: HubTaskEvent) -> Result<(), HubCommandError> {
+    app.emit(TASK_EVENT, event)
+        .map_err(|error| HubCommandError {
+            code: "internal_error",
+            message: format!("Unable to publish task event: {error}"),
+            retryable: true,
+        })
 }
 
 /// Thin command facade. Workflow logic belongs in the Hub Application Service,
@@ -156,6 +160,19 @@ pub fn get_hub_health(app: AppHandle) -> HubHealth {
     );
 
     health
+}
+
+#[tauri::command]
+pub fn list_hub_projects(app: AppHandle) -> Result<Vec<HubProject>, HubCommandError> {
+    list_projects(&app)
+}
+
+#[tauri::command]
+pub fn register_hub_project(
+    app: AppHandle,
+    path: String,
+) -> Result<RegisterProjectResponse, HubCommandError> {
+    register_project(&app, &path)
 }
 
 /// Cancellation is deliberately explicit and typed even before task execution

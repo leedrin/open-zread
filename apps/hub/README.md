@@ -24,3 +24,10 @@ The native installer is produced with `bun run --cwd apps/hub tauri:build`. Its
 `beforeBuildCommand` builds and embeds the Windows `open-zread.exe` runner plus
 the browse and WASM resources under the installer's private resource directory.
 The Hub never installs a global npm command or modifies the user's PATH.
+
+Registered local projects are stored in the Hub application data directory as
+`projects.json`. The registry keeps a generated Project ID and normalized local
+path; Git remotes are not used as identity, so separate local clones remain
+separate projects. Each startup rechecks path reachability and the native
+`.open-zread` / `.zread` Wiki layouts, reporting missing, partial, or invalid
+content independently from the project path status.

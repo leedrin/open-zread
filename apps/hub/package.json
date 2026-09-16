@@ -17,6 +17,7 @@
   "dependencies": {
     "@open-zread/hub-contract": "workspace:*",
     "@tauri-apps/api": "^2.5.0",
+    "@tauri-apps/plugin-dialog": "^2.7.3",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },

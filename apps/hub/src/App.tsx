@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { HubHealth, HubTaskEvent } from '@open-zread/hub-contract';
+import type { HubHealth, HubProject, HubTaskEvent } from '@open-zread/hub-contract';
 import {
   createHubApplicationService,
   type HubApplicationService,
@@ -9,6 +9,11 @@ import './app.css';
 type HealthState =
   | { status: 'loading' }
   | { status: 'ready'; health: HubHealth }
+  | { status: 'error'; message: string };
+
+type ProjectsState =
+  | { status: 'loading' }
+  | { status: 'ready'; projects: HubProject[] }
   | { status: 'error'; message: string };
 
 export interface HubAppProps {
@@ -29,6 +34,9 @@ function errorMessage(error: unknown): string {
 
 export function HubApp({ service = defaultService }: HubAppProps) {
   const [healthState, setHealthState] = useState<HealthState>({ status: 'loading' });
+  const [projectsState, setProjectsState] = useState<ProjectsState>({ status: 'loading' });
+  const [projectAction, setProjectAction] = useState<'idle' | 'adding'>('idle');
+  const [projectMessage, setProjectMessage] = useState<string | null>(null);
   const [lastTaskEvent, setLastTaskEvent] = useState<HubTaskEvent | null>(null);
   const mountedRef = useRef(true);
 
@@ -46,6 +54,56 @@ export function HubApp({ service = defaultService }: HubAppProps) {
     }
   }, [service]);
 
+  const loadProjects = useCallback(async () => {
+    setProjectsState({ status: 'loading' });
+    try {
+      const projects = await service.listProjects();
+      if (mountedRef.current) {
+        setProjectsState({ status: 'ready', projects });
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setProjectsState({ status: 'error', message: errorMessage(error) });
+      }
+    }
+  }, [service]);
+
+  const addProject = useCallback(async () => {
+    setProjectAction('adding');
+    setProjectMessage(null);
+    try {
+      const selectedPath = await service.selectProjectDirectory();
+      if (!selectedPath) {
+        return;
+      }
+      const result = await service.registerProject(selectedPath);
+      if (!mountedRef.current) {
+        return;
+      }
+      setProjectsState((current) => {
+        if (current.status !== 'ready') {
+          return { status: 'ready', projects: [result.project] };
+        }
+        const existingIndex = current.projects.findIndex((project) => project.id === result.project.id);
+        if (existingIndex === -1) {
+          return { status: 'ready', projects: [...current.projects, result.project] };
+        }
+        const projects = [...current.projects];
+        projects[existingIndex] = result.project;
+        return { status: 'ready', projects };
+      });
+      setProjectMessage(result.created ? 'Project added to your library.' : 'Project is already in your library.');
+    } catch (error) {
+      if (mountedRef.current) {
+        setProjectMessage(errorMessage(error));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setProjectAction('idle');
+      }
+    }
+  }, [service]);
+
   useEffect(() => {
     let disposed = false;
     let unsubscribe: (() => void) | undefined;
@@ -53,6 +111,7 @@ export function HubApp({ service = defaultService }: HubAppProps) {
     mountedRef.current = true;
 
     void loadHealth();
+    void loadProjects();
     void service.subscribeToTaskEvents((event) => {
       if (!disposed) {
         setLastTaskEvent(event);
@@ -72,7 +131,7 @@ export function HubApp({ service = defaultService }: HubAppProps) {
       mountedRef.current = false;
       unsubscribe?.();
     };
-  }, [loadHealth, service]);
+  }, [loadHealth, loadProjects, service]);
 
   const statusLabel = healthState.status === 'ready'
     ? healthState.health.service.status
@@ -122,6 +181,60 @@ export function HubApp({ service = defaultService }: HubAppProps) {
             Check again
           </button>
         </div>
+      </section>
+
+      <section className="project-library" aria-labelledby="project-library-title">
+        <div className="library-heading">
+          <div>
+            <p className="eyebrow">LOCAL PROJECTS</p>
+            <h2 id="project-library-title" className="section-title">Project library</h2>
+          </div>
+          <button
+            type="button"
+            className="primary-button"
+            data-testid="add-project"
+            disabled={projectAction === 'adding'}
+            onClick={() => void addProject()}
+          >
+            {projectAction === 'adding' ? 'Selecting…' : 'Add local project'}
+          </button>
+        </div>
+        {projectMessage && <p className="project-message" role="status">{projectMessage}</p>}
+        {projectsState.status === 'loading' && <p className="empty-state" aria-busy="true">Loading registered projects…</p>}
+        {projectsState.status === 'error' && (
+          <div className="project-error" role="alert">
+            <p>{projectsState.message}</p>
+            <button type="button" className="secondary-button" onClick={() => void loadProjects()}>Try again</button>
+          </div>
+        )}
+        {projectsState.status === 'ready' && projectsState.projects.length === 0 && (
+          <p className="empty-state" data-testid="empty-project-library">
+            Add a local code directory to start your project workspace.
+          </p>
+        )}
+        {projectsState.status === 'ready' && projectsState.projects.length > 0 && (
+          <div className="project-grid" data-testid="project-list">
+            {projectsState.projects.map((project) => (
+              <article className="project-card" key={project.id} data-testid={`project-${project.id}`}>
+                <div className="project-card-heading">
+                  <div>
+                    <h3>{project.name}</h3>
+                    <p className="project-kind">{project.sourceControl === 'git' ? 'Git project' : 'Local project'}</p>
+                  </div>
+                  <span className={`availability-badge availability-${project.availability}`}>
+                    {project.availability}
+                  </span>
+                </div>
+                <p className="project-path">{project.path}</p>
+                {project.availabilityReason && <p className="project-reason">{project.availabilityReason}</p>}
+                <dl className="wiki-summary">
+                  <div><dt>OpenZread</dt><dd>{project.wiki.openZread}</dd></div>
+                  <div><dt>Zread</dt><dd>{project.wiki.zread}</dd></div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="surface-grid" aria-label="Hub capabilities">

@@ -27,13 +27,44 @@ pub struct HubHealth {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HubProjectWikiSummary {
+    pub open_zread: &'static str,
+    pub zread: &'static str,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubProject {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub previous_paths: Vec<String>,
+    pub source_control: &'static str,
+    pub availability: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub availability_reason: Option<String>,
+    pub wiki: HubProjectWikiSummary,
+    pub favorite: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_opened_at: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterProjectResponse {
+    pub project: HubProject,
+    pub created: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CancelTaskResponse {
     pub task_id: String,
     pub accepted: bool,
     pub status: &'static str,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HubCommandError {
     pub code: &'static str,

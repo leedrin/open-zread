@@ -8,6 +8,8 @@
 export const HUB_COMMANDS = {
   getHealth: 'get_hub_health',
   cancelTask: 'cancel_hub_task',
+  listProjects: 'list_hub_projects',
+  registerProject: 'register_hub_project',
 } as const;
 
 export const HUB_EVENTS = {
@@ -37,6 +39,33 @@ export interface HubHealth {
   os: string;
   service: HubServiceHealth;
   runner: HubRunnerInfo;
+}
+
+export type HubProjectAvailability = 'available' | 'missing' | 'inaccessible' | 'permission_denied';
+export type HubWikiStatus = 'missing' | 'readable' | 'partial' | 'invalid' | 'unavailable';
+export type HubSourceControl = 'git' | 'non_git';
+
+export interface HubProjectWikiSummary {
+  openZread: HubWikiStatus;
+  zread: HubWikiStatus;
+}
+
+export interface HubProject {
+  id: string;
+  name: string;
+  path: string;
+  previousPaths: string[];
+  sourceControl: HubSourceControl;
+  availability: HubProjectAvailability;
+  availabilityReason?: string;
+  wiki: HubProjectWikiSummary;
+  favorite: boolean;
+  lastOpenedAt?: string;
+}
+
+export interface RegisterProjectResponse {
+  project: HubProject;
+  created: boolean;
 }
 
 export type HubTaskKind = 'generation' | 'update' | 'maintenance';
@@ -84,6 +113,8 @@ export interface CancelTaskResponse {
 export type HubCommandErrorCode =
   | 'invalid_request'
   | 'task_not_found'
+  | 'project_invalid_path'
+  | 'project_registry_corrupt'
   | 'service_unavailable'
   | 'internal_error';
 

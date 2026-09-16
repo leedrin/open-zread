@@ -6,11 +6,18 @@ import {
   type CancelTaskResponse,
   type HubCommandName,
   type HubHealth,
+  type HubProject,
+  type HubProjectAvailability,
+  type HubProjectWikiSummary,
+  type HubSourceControl,
+  type HubWikiStatus,
   type HubRunnerInfo,
   type HubTaskEvent,
+  type RegisterProjectResponse,
 } from '@open-zread/hub-contract';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
+import { open as tauriOpen } from '@tauri-apps/plugin-dialog';
 
 export interface HubEvent<T> {
   payload: T;
@@ -23,10 +30,14 @@ export type Unsubscribe = () => void;
 export interface HubTransport {
   invoke(command: HubCommandName, args?: Record<string, unknown>): Promise<unknown>;
   listen(event: typeof HUB_EVENTS.task, listener: HubEventListener<unknown>): Promise<Unsubscribe>;
+  selectProjectDirectory(): Promise<string | null>;
 }
 
 export interface HubApplicationService {
   getHealth(): Promise<HubHealth>;
+  listProjects(): Promise<HubProject[]>;
+  selectProjectDirectory(): Promise<string | null>;
+  registerProject(path: string): Promise<RegisterProjectResponse>;
   cancelTask(taskId: string): Promise<CancelTaskResponse>;
   subscribeToTaskEvents(listener: (event: HubTaskEvent) => void): Promise<Unsubscribe>;
 }
@@ -37,6 +48,14 @@ const tauriTransport: HubTransport = {
   },
   listen(event, listener) {
     return tauriListen(event, listener);
+  },
+  selectProjectDirectory() {
+    return tauriOpen({
+      directory: true,
+      multiple: false,
+      recursive: false,
+      title: 'Select a local project',
+    });
   },
 };
 
@@ -101,6 +120,78 @@ function parseHealth(value: unknown): HubHealth {
   };
 }
 
+const PROJECT_AVAILABILITIES: HubProjectAvailability[] = ['available', 'missing', 'inaccessible', 'permission_denied'];
+const WIKI_STATUSES: HubWikiStatus[] = ['missing', 'readable', 'partial', 'invalid', 'unavailable'];
+
+function parseProjectWiki(value: unknown): HubProjectWikiSummary {
+  if (!isRecord(value)
+    || typeof value.openZread !== 'string'
+    || typeof value.zread !== 'string'
+    || !WIKI_STATUSES.includes(value.openZread as HubWikiStatus)
+    || !WIKI_STATUSES.includes(value.zread as HubWikiStatus)) {
+    throw new HubProtocolError('Invalid Hub response: project wiki summary is malformed.');
+  }
+  return {
+    openZread: value.openZread as HubWikiStatus,
+    zread: value.zread as HubWikiStatus,
+  };
+}
+
+function parseProject(value: unknown): HubProject {
+  if (!isRecord(value)) {
+    throw new HubProtocolError('Invalid Hub response: project payload is malformed.');
+  }
+  const availability = requiredString(value.availability, 'project.availability');
+  const sourceControl = requiredString(value.sourceControl, 'project.sourceControl');
+  if (!PROJECT_AVAILABILITIES.includes(availability as HubProjectAvailability)) {
+    throw new HubProtocolError('Invalid Hub response: unknown project availability.');
+  }
+  if (sourceControl !== 'git' && sourceControl !== 'non_git') {
+    throw new HubProtocolError('Invalid Hub response: unknown project source control.');
+  }
+  if (!Array.isArray(value.previousPaths) || value.previousPaths.some((path) => typeof path !== 'string')) {
+    throw new HubProtocolError('Invalid Hub response: project previous paths are malformed.');
+  }
+  if (typeof value.favorite !== 'boolean') {
+    throw new HubProtocolError('Invalid Hub response: project favorite flag is malformed.');
+  }
+  if (value.availabilityReason !== undefined && typeof value.availabilityReason !== 'string') {
+    throw new HubProtocolError('Invalid Hub response: project availability reason is malformed.');
+  }
+  if (value.lastOpenedAt !== undefined && typeof value.lastOpenedAt !== 'string') {
+    throw new HubProtocolError('Invalid Hub response: project last-opened timestamp is malformed.');
+  }
+  return {
+    id: requiredString(value.id, 'project.id'),
+    name: requiredString(value.name, 'project.name'),
+    path: requiredString(value.path, 'project.path'),
+    previousPaths: value.previousPaths,
+    sourceControl: sourceControl as HubSourceControl,
+    availability: availability as HubProjectAvailability,
+    ...(typeof value.availabilityReason === 'string' ? { availabilityReason: value.availabilityReason } : {}),
+    wiki: parseProjectWiki(value.wiki),
+    favorite: value.favorite,
+    ...(typeof value.lastOpenedAt === 'string' ? { lastOpenedAt: value.lastOpenedAt } : {}),
+  };
+}
+
+function parseProjectList(value: unknown): HubProject[] {
+  if (!Array.isArray(value)) {
+    throw new HubProtocolError('Invalid Hub response: project list is malformed.');
+  }
+  return value.map(parseProject);
+}
+
+function parseRegisterProjectResponse(value: unknown): RegisterProjectResponse {
+  if (!isRecord(value) || typeof value.created !== 'boolean') {
+    throw new HubProtocolError('Invalid Hub response: project registration payload is malformed.');
+  }
+  return {
+    project: parseProject(value.project),
+    created: value.created,
+  };
+}
+
 function parseTaskEvent(value: unknown): HubTaskEvent {
   if (!isRecord(value)) {
     throw new HubProtocolError('Invalid Hub event: task payload is malformed.');
@@ -145,6 +236,32 @@ export function createHubApplicationService(
   return {
     getHealth() {
       return transport.invoke(HUB_COMMANDS.getHealth).then(parseHealth);
+    },
+
+    listProjects() {
+      return transport.invoke(HUB_COMMANDS.listProjects).then(parseProjectList);
+    },
+
+    selectProjectDirectory() {
+      return transport.selectProjectDirectory().then((path) => {
+        if (path !== null && typeof path !== 'string') {
+          throw new HubProtocolError('Invalid Hub response: selected project path is malformed.');
+        }
+        return path;
+      });
+    },
+
+    registerProject(path) {
+      const normalizedPath = path.trim();
+      if (!normalizedPath) {
+        return Promise.reject({
+          code: 'invalid_request',
+          message: 'Project path is required.',
+          retryable: false,
+        });
+      }
+      return transport.invoke(HUB_COMMANDS.registerProject, { path: normalizedPath })
+        .then(parseRegisterProjectResponse);
     },
 
     cancelTask(taskId) {
