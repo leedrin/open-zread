@@ -18,10 +18,17 @@ export type HubCommandName = typeof HUB_COMMANDS[keyof typeof HUB_COMMANDS];
 
 export type HubRuntime = 'tauri';
 export type HubServiceStatus = 'healthy' | 'degraded' | 'unavailable';
+export type HubRunnerStatus = 'available' | 'unavailable';
 
 export interface HubServiceHealth {
   name: 'Hub Application Service';
   status: HubServiceStatus;
+}
+
+export interface HubRunnerInfo {
+  status: HubRunnerStatus;
+  version: string;
+  executablePath: string;
 }
 
 export interface HubHealth {
@@ -29,6 +36,7 @@ export interface HubHealth {
   runtime: HubRuntime;
   os: string;
   service: HubServiceHealth;
+  runner: HubRunnerInfo;
 }
 
 export type HubTaskKind = 'generation' | 'update' | 'maintenance';

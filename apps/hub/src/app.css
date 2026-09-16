@@ -76,6 +76,8 @@ h3 { margin-bottom: 8px; font-size: 16px; }
 .health-details div { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; }
 .health-details dt { color: #918982; }
 .health-details dd { margin: 0; color: #4d4844; font-weight: 600; }
+.health-details .health-detail-path { display: grid; gap: 4px; }
+.health-detail-path dd { overflow-wrap: anywhere; text-align: right; }
 .error-message { color: #b34949; font-size: 13px; line-height: 1.45; }
 .secondary-button { border: 1px solid rgba(41, 39, 37, .16); border-radius: 9px; padding: 9px 12px; color: #4d4844; background: #fff; cursor: pointer; }
 .secondary-button:hover { border-color: rgba(41, 39, 37, .3); background: #f3f1ef; }

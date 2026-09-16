@@ -9,11 +9,20 @@ pub struct HubServiceHealth {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HubRunnerInfo {
+    pub status: &'static str,
+    pub version: String,
+    pub executable_path: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HubHealth {
     pub app_version: &'static str,
     pub runtime: &'static str,
     pub os: &'static str,
     pub service: HubServiceHealth,
+    pub runner: HubRunnerInfo,
 }
 
 #[derive(Clone, Serialize)]

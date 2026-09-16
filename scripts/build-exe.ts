@@ -1,4 +1,12 @@
-import { existsSync, readFileSync, statSync, cpSync, mkdirSync, copyFileSync } from 'fs';
+import {
+  cpSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from 'fs';
 import { join, resolve } from 'path';
 
 const TARGETS = {
@@ -13,28 +21,35 @@ type TargetKey = keyof typeof TARGETS;
 const ROOT = resolve(import.meta.dir, '..');
 const SRC_ENTRY = join(ROOT, 'apps', 'cli', 'src', 'index.tsx');
 const OUT_DIR = join(ROOT, 'dist', 'exe');
-  const SHIM_PATH = join(ROOT, 'scripts', 'yoga-wasm-auto-shim.ts');
+const SHIM_PATH = join(ROOT, 'scripts', 'yoga-wasm-auto-shim.ts');
 
-function findYogaWasm(): string {
-  const candidates = [
-    join(ROOT, 'node_modules', '.bun', 'yoga-wasm-web@0.3.3', 'node_modules', 'yoga-wasm-web', 'dist', 'yoga.wasm'),
-    join(ROOT, 'node_modules', 'yoga-wasm-web', 'dist', 'yoga.wasm'),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
+function findFileRecursively(dir: string, target: string): string | null {
+  try {
+    for (const entry of readdirSync(dir)) {
+      const fullPath = join(dir, entry);
+      try {
+        const stat = statSync(fullPath);
+        if (stat.isFile() && entry === target) return fullPath;
+        if (stat.isDirectory()) {
+          const found = findFileRecursively(fullPath, target);
+          if (found) return found;
+        }
+      } catch {
+        // Ignore packages that disappear during an install or contain unreadable files.
+      }
+    }
+  } catch {
+    // Ignore missing dependency directories and report a useful error at the call site.
   }
-  throw new Error('yoga.wasm not found in node_modules');
+  return null;
 }
 
-function findTreeSitterWasm(): string {
-  const candidates = [
-    join(ROOT, 'node_modules', '.bun', 'web-tree-sitter@0.20.8', 'node_modules', 'web-tree-sitter', 'tree-sitter.wasm'),
-    join(ROOT, 'node_modules', 'web-tree-sitter', 'tree-sitter.wasm'),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
+function findWasm(name: string, required: boolean): string | null {
+  const found = findFileRecursively(join(ROOT, 'node_modules'), name);
+  if (!found && required) {
+    throw new Error(`${name} not found in node_modules`);
   }
-  throw new Error('tree-sitter.wasm not found in node_modules');
+  return found;
 }
 
 function parseArgs() {
@@ -93,7 +108,7 @@ Examples:
 `);
 }
 
-function copyAssets(targetDir: string) {
+export function copyAssets(targetDir: string) {
   const browseDist = join(ROOT, 'apps', 'browse', 'dist');
   if (existsSync(browseDist)) {
     cpSync(browseDist, join(targetDir, 'browse'), { recursive: true });
@@ -102,28 +117,92 @@ function copyAssets(targetDir: string) {
     console.warn('  Warning: browse/ dist not found — run "bun run build" first');
   }
 
-  const yogaWasm = findYogaWasm();
-  copyFileSync(yogaWasm, join(targetDir, 'yoga.wasm'));
-  console.log('  Copied yoga.wasm');
-
-  const treeSitterWasm = findTreeSitterWasm();
-  copyFileSync(treeSitterWasm, join(targetDir, 'tree-sitter.wasm'));
-  console.log('  Copied tree-sitter.wasm');
+  for (const name of ['yoga.wasm', 'tree-sitter.wasm', 'mappings.wasm']) {
+    const source = findWasm(name, name !== 'mappings.wasm');
+    if (source) {
+      copyFileSync(source, join(targetDir, name));
+      console.log(`  Copied ${name}`);
+    } else {
+      console.warn(`  Warning: ${name} not found in node_modules`);
+    }
+  }
 }
 
-async function runBuild() {
+export interface StandaloneCliBuildResult {
+  targetDir: string;
+  executablePath: string;
+  version: string;
+}
+
+export async function buildStandaloneCli(
+  target: TargetKey,
+  targetDir: string,
+  exeName?: string,
+): Promise<StandaloneCliBuildResult> {
   if (!existsSync(SRC_ENTRY)) {
-    console.error(`Source entry not found: ${SRC_ENTRY}`);
-    process.exit(1);
+    throw new Error(`Source entry not found: ${SRC_ENTRY}`);
   }
 
   if (!existsSync(SHIM_PATH)) {
-    console.error(`Shim not found: ${SHIM_PATH}`);
-    process.exit(1);
+    throw new Error(`Shim not found: ${SHIM_PATH}`);
   }
 
   const pkg = JSON.parse(readFileSync(join(ROOT, 'apps', 'cli', 'package.json'), 'utf-8'));
+  const info = TARGETS[target];
+  const outputName = exeName ?? (target === 'bun-windows-x64'
+    ? 'open-zread.exe'
+    : `open-zread-${info.os}-${info.arch}${info.ext}`);
+  const outfile = join(targetDir, outputName);
 
+  mkdirSync(targetDir, { recursive: true });
+
+  console.log(`\nBuilding ${outputName}...`);
+
+  const result = await Bun.build({
+    entrypoints: [SRC_ENTRY],
+    compile: {
+      target,
+      outfile,
+    },
+    plugins: [
+      {
+        name: 'yoga-wasm-shim',
+        setup(build) {
+          build.onResolve({ filter: /^yoga-wasm-web\/auto$/ }, () => ({
+            path: SHIM_PATH,
+          }));
+          build.onResolve({ filter: /^yoga-wasm-web$/ }, () => ({
+            path: join(
+              ROOT, 'node_modules', '.bun', 'yoga-wasm-web@0.3.3',
+              'node_modules', 'yoga-wasm-web', 'dist', 'index.js'
+            ),
+          }));
+        },
+      },
+    ],
+    define: {
+      'globalThis.CLI_VERSION': JSON.stringify(pkg.version),
+      'globalThis.IS_PACKAGED': 'true',
+    },
+  });
+
+  if (!result.success) {
+    const logs = result.logs.map((log) => `    ${log}`).join('\n');
+    throw new Error(`Build failed for ${outputName}:\n${logs}`);
+  }
+
+  const size = statSync(outfile).size;
+  const mb = (size / 1024 / 1024).toFixed(1);
+  console.log(`  ✓ ${outputName} (${mb} MB)`);
+
+  console.log('  Copying assets...');
+  copyAssets(targetDir);
+
+  console.log(`  ✓ Output: ${targetDir}`);
+  return { targetDir, executablePath: outfile, version: pkg.version };
+}
+
+async function runBuild(parsed: ReturnType<typeof parseArgs>) {
   const targets = parsed.all
     ? (Object.keys(TARGETS) as TargetKey[])
     : [parsed.target as TargetKey];
@@ -134,75 +213,33 @@ async function runBuild() {
       ? 'open-zread.exe'
       : `open-zread-${info.os}-${info.arch}${info.ext}`;
     const targetDir = join(OUT_DIR, `open-zread-${info.os}-${info.arch}`);
-    const outfile = join(targetDir, exeName);
+    await buildStandaloneCli(target, targetDir, exeName);
+  }
+}
 
-    mkdirSync(targetDir, { recursive: true });
+if (import.meta.main) {
+  const parsed = parseArgs();
 
-    console.log(`\nBuilding ${exeName}...`);
-
-    const result = await Bun.build({
-      entrypoints: [SRC_ENTRY],
-      compile: {
-        target,
-        outfile,
-      },
-      plugins: [
-        {
-          name: 'yoga-wasm-shim',
-          setup(build) {
-            build.onResolve({ filter: /^yoga-wasm-web\/auto$/ }, () => ({
-              path: SHIM_PATH,
-            }));
-            build.onResolve({ filter: /^yoga-wasm-web$/ }, () => ({
-              path: join(
-                ROOT, 'node_modules', '.bun', 'yoga-wasm-web@0.3.3',
-                'node_modules', 'yoga-wasm-web', 'dist', 'index.js'
-              ),
-            }));
-          },
-        },
-      ],
-      define: {
-        'globalThis.CLI_VERSION': JSON.stringify(pkg.version),
-        'globalThis.IS_PACKAGED': 'true',
-      },
+  if (!parsed.skipBuild) {
+    console.log('Running turbo build (for browse frontend)...');
+    const proc = Bun.spawn(['bun', 'run', 'build'], {
+      cwd: ROOT,
+      stdout: 'inherit',
+      stderr: 'inherit',
     });
-
-    if (result.success) {
-      const size = statSync(outfile).size;
-      const mb = (size / 1024 / 1024).toFixed(1);
-      console.log(`  ✓ ${exeName} (${mb} MB)`);
-    } else {
-      console.error(`  ✗ Build failed for ${exeName}:`);
-      for (const log of result.logs) {
-        console.error(`    ${log}`);
-      }
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      console.error('Build failed');
       process.exit(1);
     }
-
-    console.log('  Copying assets...');
-    copyAssets(targetDir);
-
-    console.log(`  ✓ Output: ${targetDir}`);
+  } else {
+    console.log('Skipping turbo build (--skip-build)');
   }
-}
 
-const parsed = parseArgs();
-
-if (!parsed.skipBuild) {
-  console.log('Running turbo build (for browse frontend)...');
-  const proc = Bun.spawn(['bun', 'run', 'build'], {
-    cwd: ROOT,
-    stdout: 'inherit',
-    stderr: 'inherit',
-  });
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    console.error('Build failed');
+  try {
+    await runBuild(parsed);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
     process.exit(1);
   }
-} else {
-  console.log('Skipping turbo build (--skip-build)');
 }
-
-await runBuild();

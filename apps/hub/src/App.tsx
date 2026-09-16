@@ -110,6 +110,9 @@ export function HubApp({ service = defaultService }: HubAppProps) {
               <div><dt>Version</dt><dd data-testid="app-version">{healthState.health.appVersion}</dd></div>
               <div><dt>Runtime</dt><dd>{healthState.health.runtime}</dd></div>
               <div><dt>OS</dt><dd>{healthState.health.os}</dd></div>
+              <div><dt>OpenZread</dt><dd data-testid="runner-status">{healthState.health.runner.status}</dd></div>
+              <div><dt>Runner version</dt><dd data-testid="runner-version">{healthState.health.runner.version}</dd></div>
+              <div className="health-detail-path"><dt>Runner path</dt><dd data-testid="runner-path">{healthState.health.runner.executablePath}</dd></div>
             </dl>
           )}
           {healthState.status === 'error' && (

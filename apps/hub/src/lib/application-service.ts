@@ -6,6 +6,7 @@ import {
   type CancelTaskResponse,
   type HubCommandName,
   type HubHealth,
+  type HubRunnerInfo,
   type HubTaskEvent,
 } from '@open-zread/hub-contract';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
@@ -60,6 +61,21 @@ function requiredString(value: unknown, field: string): string {
   return value;
 }
 
+function parseRunnerInfo(value: unknown): HubRunnerInfo {
+  if (!isRecord(value)) {
+    throw new HubProtocolError('Invalid Hub response: runner payload is malformed.');
+  }
+  const status = requiredString(value.status, 'runner.status');
+  if (status !== 'available' && status !== 'unavailable') {
+    throw new HubProtocolError('Invalid Hub response: unknown runner status.');
+  }
+  return {
+    status,
+    version: requiredString(value.version, 'runner.version'),
+    executablePath: requiredString(value.executablePath, 'runner.executablePath'),
+  };
+}
+
 function parseHealth(value: unknown): HubHealth {
   if (!isRecord(value) || !isRecord(value.service)) {
     throw new HubProtocolError('Invalid Hub response: health payload is malformed.');
@@ -77,6 +93,7 @@ function parseHealth(value: unknown): HubHealth {
     appVersion: requiredString(value.appVersion, 'appVersion'),
     runtime,
     os: requiredString(value.os, 'os'),
+    runner: parseRunnerInfo(value.runner),
     service: {
       name: 'Hub Application Service',
       status: status as HubHealth['service']['status'],

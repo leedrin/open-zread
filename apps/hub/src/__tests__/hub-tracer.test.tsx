@@ -17,6 +17,11 @@ const healthyResponse: HubHealth = {
     name: 'Hub Application Service',
     status: 'healthy',
   },
+  runner: {
+    status: 'available',
+    version: '1.2.2',
+    executablePath: 'C:\\Program Files\\Open Zread Hub\\resources\\open-zread\\open-zread.exe',
+  },
 };
 
 describe('Hub React to application-service tracer bullet', () => {
@@ -44,6 +49,11 @@ describe('Hub React to application-service tracer bullet', () => {
     expect(commands).toEqual(['get_hub_health']);
     expect(renderer?.root.findByProps({ 'data-testid': 'service-status' }).children).toEqual(['healthy']);
     expect(renderer?.root.findByProps({ 'data-testid': 'app-version' }).children).toEqual(['0.1.0-test']);
+    expect(renderer?.root.findByProps({ 'data-testid': 'runner-status' }).children).toEqual(['available']);
+    expect(renderer?.root.findByProps({ 'data-testid': 'runner-version' }).children).toEqual(['1.2.2']);
+    expect(renderer?.root.findByProps({ 'data-testid': 'runner-path' }).children).toEqual([
+      'C:\\Program Files\\Open Zread Hub\\resources\\open-zread\\open-zread.exe',
+    ]);
 
     const taskEvent: HubTaskEvent = {
       taskId: 'task-1',
@@ -66,6 +76,22 @@ describe('Hub React to application-service tracer bullet', () => {
   test('rejects malformed command responses at the IPC boundary', async () => {
     const transport: HubTransport = {
       invoke: async () => ({ service: { status: 'healthy' } }),
+      listen: async () => () => undefined,
+    };
+    const service = createHubApplicationService(transport);
+
+    await expect(service.getHealth()).rejects.toMatchObject({
+      name: 'HubProtocolError',
+      code: 'internal_error',
+    });
+  });
+
+  test('rejects a health response without embedded runner information', async () => {
+    const transport: HubTransport = {
+      invoke: async () => ({
+        ...healthyResponse,
+        runner: undefined,
+      }),
       listen: async () => () => undefined,
     };
     const service = createHubApplicationService(transport);
