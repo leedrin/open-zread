@@ -1,3 +1,5 @@
 /target/
 /gen/
 /resources/open-zread/
+/icons/*
+!/icons/icon.ico

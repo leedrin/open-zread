@@ -28,6 +28,7 @@
   "bundle": {
     "active": true,
     "targets": ["msi"],
+    "icon": ["icons/icon.ico"],
     "resources": {
       "resources/open-zread": "open-zread"
     },
