@@ -9,6 +9,7 @@ export const HUB_COMMANDS = {
   getHealth: 'get_hub_health',
   setZreadExecutable: 'set_hub_zread_executable',
   startOpenZreadTask: 'start_hub_open_zread_task',
+  startZreadTask: 'start_hub_zread_task',
   cancelTask: 'cancel_hub_task',
   listProjects: 'list_hub_projects',
   registerProject: 'register_hub_project',
@@ -191,15 +192,16 @@ export interface HubTaskEvent {
   progress?: HubTaskProgress;
 }
 
-export type HubOpenZreadOperation = 'generate' | 'sync';
+export type HubTaskOperation = 'generate' | 'sync';
+export type HubOpenZreadOperation = HubTaskOperation;
 
 export interface HubTask {
   taskId: string;
   kind: Extract<HubTaskKind, 'generation' | 'update'>;
   status: Extract<HubTaskStatus, 'queued' | 'running'>;
   projectId: string;
-  provider: 'open_zread';
-  operation: HubOpenZreadOperation;
+  provider: 'open_zread' | 'zread';
+  operation: HubTaskOperation;
   model: string;
   startedAt: string;
 }

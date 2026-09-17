@@ -69,6 +69,7 @@ export interface HubApplicationService {
   readZreadSource(projectId: string, path: string): Promise<HubSourceFile>;
   readZreadAsset(projectId: string, pagePath: string, assetPath: string): Promise<HubWikiAsset>;
   startOpenZreadTask(projectId: string, operation: HubOpenZreadOperation): Promise<HubTask>;
+  startZreadTask(projectId: string): Promise<HubTask>;
   cancelTask(taskId: string): Promise<CancelTaskResponse>;
   subscribeToTaskEvents(listener: (event: HubTaskEvent) => void): Promise<Unsubscribe>;
 }
@@ -511,7 +512,7 @@ function parseTask(value: unknown): HubTask {
   if (operation !== 'generate' && operation !== 'sync') {
     throw new HubProtocolError('Invalid Hub response: OpenZread operation is unsupported.');
   }
-  if (value.provider !== 'open_zread') {
+  if (value.provider !== 'open_zread' && value.provider !== 'zread') {
     throw new HubProtocolError('Invalid Hub response: task provider is unsupported.');
   }
   return {
@@ -519,7 +520,7 @@ function parseTask(value: unknown): HubTask {
     kind,
     status,
     projectId: requiredString(value.projectId, 'projectId'),
-    provider: 'open_zread',
+    provider: value.provider,
     operation,
     model: requiredString(value.model, 'model'),
     startedAt: requiredString(value.startedAt, 'startedAt'),
@@ -731,6 +732,16 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.startOpenZreadTask, {
         projectId: normalizedId,
         operation,
+      }).then(parseTask);
+    },
+
+    startZreadTask(projectId) {
+      const normalizedId = projectId.trim();
+      if (!normalizedId) {
+        return invalidRequest('Project id is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.startZreadTask, {
+        projectId: normalizedId,
       }).then(parseTask);
     },
 

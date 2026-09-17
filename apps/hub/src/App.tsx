@@ -335,6 +335,25 @@ export function HubApp({ service = defaultService }: HubAppProps) {
     }
   }, [activeTask, service]);
 
+  const startZreadTask = useCallback(async (project: HubProject) => {
+    if (activeTask) {
+      return;
+    }
+    setTaskMessage(null);
+    setActiveTaskEvent(null);
+    try {
+      const task = await service.startZreadTask(project.id);
+      if (mountedRef.current) {
+        setActiveTask(task);
+        setTaskMessage(`Zread generation started for ${project.name}.`);
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setTaskMessage(errorMessage(error));
+      }
+    }
+  }, [activeTask, service]);
+
   const cancelActiveTask = useCallback(async () => {
     if (!activeTask) {
       return;
@@ -469,6 +488,10 @@ export function HubApp({ service = defaultService }: HubAppProps) {
     ? healthState.health.providers.find((provider) => provider.provider === 'open_zread')
     : undefined;
   const openZreadReady = openZreadProvider?.generator.status === 'available';
+  const zreadProvider = healthState.status === 'ready'
+    ? healthState.health.providers.find((provider) => provider.provider === 'zread')
+    : undefined;
+  const zreadReady = zreadProvider?.generator.status === 'available';
   const currentTaskEvent = activeTask && activeTaskEvent?.taskId === activeTask.taskId
     ? activeTaskEvent
     : undefined;
@@ -697,6 +720,15 @@ export function HubApp({ service = defaultService }: HubAppProps) {
                     onClick={() => void startOpenZreadTask(project, 'sync')}
                   >
                     Sync OpenZread
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    data-testid={`generate-zread-${project.id}`}
+                    disabled={!zreadReady || project.availability !== 'available' || taskBusy || projectAction !== 'idle'}
+                    onClick={() => void startZreadTask(project)}
+                  >
+                    Generate Zread
                   </button>
                   <button
                     type="button"

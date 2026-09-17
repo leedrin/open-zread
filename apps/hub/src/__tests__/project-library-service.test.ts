@@ -30,6 +30,13 @@ const task: HubTask = {
   startedAt: '1720000000000',
 };
 
+const zreadTask: HubTask = {
+  ...task,
+  taskId: 'task-zread-1',
+  provider: 'zread',
+  model: 'Zread native configuration',
+};
+
 function createTransport(
   responses: Record<string, unknown>,
   copied: string[],
@@ -110,11 +117,14 @@ describe('Project Library application-service interface', () => {
     const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
     const service = createHubApplicationService(createTransport({
       start_hub_open_zread_task: task,
+      start_hub_zread_task: zreadTask,
     }, [], calls));
 
     await expect(service.startOpenZreadTask(project.id, 'generate')).resolves.toEqual(task);
+    await expect(service.startZreadTask(project.id)).resolves.toEqual(zreadTask);
     expect(calls).toEqual([
       { command: 'start_hub_open_zread_task', args: { projectId: project.id, operation: 'generate' } },
+      { command: 'start_hub_zread_task', args: { projectId: project.id } },
     ]);
   });
 

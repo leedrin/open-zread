@@ -469,6 +469,29 @@ fn inspect_zread_provider(
     }
 }
 
+pub(crate) fn native_zread_runner_executable(app: &AppHandle) -> Result<PathBuf, HubCommandError> {
+    let (configured, diagnostics) = configured_zread_executable(app);
+    let health = inspect_zread_provider(configured.clone(), diagnostics);
+    if health.generator.status != "available" {
+        return Err(HubCommandError {
+            code: "service_unavailable",
+            message: if health.generator.diagnostics.is_empty() {
+                "The configured native Zread runner is unavailable.".to_string()
+            } else {
+                health.generator.diagnostics.join(" ")
+            },
+            retryable: true,
+        });
+    }
+    configured
+        .map(|(path, _)| path)
+        .ok_or_else(|| HubCommandError {
+            code: "service_unavailable",
+            message: "No native zread.exe is configured.".to_string(),
+            retryable: true,
+        })
+}
+
 fn save_zread_executable(app: &AppHandle, executable: &Path) -> Result<(), HubCommandError> {
     let path = provider_settings_path(app).map_err(|message| HubCommandError {
         code: "internal_error",
@@ -582,6 +605,15 @@ pub fn start_hub_open_zread_task(
     operation: String,
 ) -> Result<HubTask, HubCommandError> {
     crate::tasks::start_open_zread_task(&app, &coordinator, &project_id, &operation)
+}
+
+#[tauri::command]
+pub fn start_hub_zread_task(
+    app: AppHandle,
+    coordinator: State<'_, TaskCoordinator>,
+    project_id: String,
+) -> Result<HubTask, HubCommandError> {
+    crate::tasks::start_zread_task(&app, &coordinator, &project_id)
 }
 
 #[tauri::command]

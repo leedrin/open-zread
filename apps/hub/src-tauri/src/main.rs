@@ -13,6 +13,7 @@ fn main() {
             commands::get_hub_health,
             commands::set_hub_zread_executable,
             commands::start_hub_open_zread_task,
+            commands::start_hub_zread_task,
             commands::cancel_hub_task,
             commands::list_hub_projects,
             commands::register_hub_project,
