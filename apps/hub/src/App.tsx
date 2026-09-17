@@ -4,7 +4,7 @@ import {
   createHubApplicationService,
   type HubApplicationService,
 } from './lib/application-service';
-import { OpenZreadReader } from './components/OpenZreadReader';
+import { OpenZreadReader, type WikiReaderSession } from './components/OpenZreadReader';
 import './app.css';
 
 type HealthState =
@@ -24,6 +24,10 @@ type ReaderState =
   | { status: 'loading'; project: HubProject; provider: HubWikiProvider }
   | { status: 'ready'; project: HubProject; wiki: HubWikiDocument }
   | { status: 'error'; project: HubProject; provider: HubWikiProvider; message: string };
+
+const EMPTY_READER_SESSION: WikiReaderSession = {
+  scrollTop: 0,
+};
 
 export interface HubAppProps {
   service?: HubApplicationService;
@@ -52,6 +56,13 @@ function formatLastOpened(lastOpenedAt?: string): string {
   return new Date(timestamp).toLocaleString();
 }
 
+function availableWikiProviders(project: HubProject): HubWikiProvider[] {
+  return (['open_zread', 'zread'] as const).filter((provider) => {
+    const status = provider === 'open_zread' ? project.wiki.openZread : project.wiki.zread;
+    return status !== 'missing' && status !== 'unavailable';
+  });
+}
+
 function StarIcon({ filled }: { filled: boolean }) {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" focusable="false">
@@ -74,6 +85,7 @@ export function HubApp({ service = defaultService }: HubAppProps) {
   const [projectQuery, setProjectQuery] = useState('');
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [readerState, setReaderState] = useState<ReaderState>({ status: 'closed' });
+  const [readerSessions, setReaderSessions] = useState<Record<string, WikiReaderSession>>({});
   const [lastTaskEvent, setLastTaskEvent] = useState<HubTaskEvent | null>(null);
   const mountedRef = useRef(true);
 
@@ -244,6 +256,13 @@ export function HubApp({ service = defaultService }: HubAppProps) {
       }
     }
   }, [service]);
+
+  const updateReaderSession = useCallback((projectId: string, provider: HubWikiProvider, session: WikiReaderSession) => {
+    setReaderSessions((current) => ({
+      ...current,
+      [`${projectId}:${provider}`]: session,
+    }));
+  }, []);
 
   const relocateProject = useCallback(async (project: HubProject) => {
     setProjectAction('managing');
@@ -581,6 +600,11 @@ export function HubApp({ service = defaultService }: HubAppProps) {
           project={readerState.project}
           wiki={readerState.wiki}
           providerLabel={readerState.wiki.provider === 'zread' ? 'ZREAD WIKI' : 'OPENZREAD WIKI'}
+          availableProviders={availableWikiProviders(readerState.project)}
+          session={readerSessions[`${readerState.project.id}:${readerState.wiki.provider}`] ?? EMPTY_READER_SESSION}
+          onSessionChange={(session) => updateReaderSession(readerState.project.id, readerState.wiki.provider, session)}
+          onSwitchProvider={(provider) => void openWikiReader(readerState.project, provider)}
+          switchingProvider={false}
           readSource={(projectId, path) => readerState.wiki.provider === 'zread'
             ? service.readZreadSource(projectId, path)
             : service.readOpenZreadSource(projectId, path)}

@@ -1,10 +1,28 @@
-import { useEffect, useMemo, useState, type ElementType } from 'react';
-import type { HubProject, HubSourceFile, HubWikiAsset, HubWikiDocument, HubWikiPage } from '@open-zread/hub-contract';
+import { useEffect, useMemo, useRef, useState, type ElementType } from 'react';
+import type {
+  HubProject,
+  HubSourceFile,
+  HubWikiAsset,
+  HubWikiDocument,
+  HubWikiPage,
+  HubWikiProvider,
+} from '@open-zread/hub-contract';
+
+export interface WikiReaderSession {
+  selectedSlug?: string;
+  scrollTop: number;
+  expandedSections?: string[];
+}
 
 interface OpenZreadReaderProps {
   project: HubProject;
   wiki: HubWikiDocument;
   providerLabel: string;
+  availableProviders: HubWikiProvider[];
+  session: WikiReaderSession;
+  onSessionChange: (session: WikiReaderSession) => void;
+  onSwitchProvider: (provider: HubWikiProvider) => void;
+  switchingProvider: boolean;
   readSource: (projectId: string, path: string) => Promise<HubSourceFile>;
   readAsset: (projectId: string, pagePath: string, assetPath: string) => Promise<HubWikiAsset>;
   onClose: () => void;
@@ -228,18 +246,86 @@ function MarkdownContent({
   );
 }
 
-export function OpenZreadReader({ project, wiki, providerLabel, readSource, readAsset, onClose }: OpenZreadReaderProps) {
+export function OpenZreadReader({
+  project,
+  wiki,
+  providerLabel,
+  availableProviders,
+  session,
+  onSessionChange,
+  onSwitchProvider,
+  switchingProvider,
+  readSource,
+  readAsset,
+  onClose,
+}: OpenZreadReaderProps) {
   const readablePages = wiki.pages.filter((page) => page.status === 'readable');
-  const [selectedSlug, setSelectedSlug] = useState(readablePages[0]?.slug ?? wiki.pages[0]?.slug ?? '');
+  const firstPageSlug = readablePages[0]?.slug ?? wiki.pages[0]?.slug ?? '';
+  const [manualSelectedSlug, setManualSelectedSlug] = useState<string | null>(null);
+  const rememberedPage = wiki.pages.find((page) => page.slug === session.selectedSlug);
+  const selectedPageWasUnavailable = manualSelectedSlug === null
+    && session.selectedSlug !== undefined
+    && (rememberedPage === undefined || rememberedPage.status !== 'readable');
+  const selectedSlug = manualSelectedSlug
+    ?? (rememberedPage?.status === 'readable' ? rememberedPage.slug : firstPageSlug);
   const [sourceState, setSourceState] = useState<{ path: string; content: string } | null>(null);
   const [sourceLoading, setSourceLoading] = useState<string | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
+  const articleRef = useRef<HTMLElement | null>(null);
   const selectedPage = wiki.pages.find((page) => page.slug === selectedSlug) ?? wiki.pages[0];
+  const sections = useMemo(() => {
+    const grouped = new Map<string, HubWikiPage[]>();
+    wiki.pages.forEach((page) => {
+      const pages = grouped.get(page.section) ?? [];
+      pages.push(page);
+      grouped.set(page.section, pages);
+    });
+    return [...grouped.entries()];
+  }, [wiki.pages]);
+  const expandedSections = new Set(
+    session.expandedSections !== undefined
+      ? session.expandedSections
+      : sections.map(([section]) => section),
+  );
+
+  useEffect(() => {
+    setManualSelectedSlug(null);
+    setSourceState(null);
+    setSourceLoading(null);
+    setSourceError(null);
+  }, [wiki.provider, wiki.currentPointer, wiki.versionId]);
+
+  useEffect(() => {
+    if (articleRef.current) {
+      articleRef.current.scrollTop = session.scrollTop;
+    }
+  }, [session.scrollTop, wiki.provider, wiki.currentPointer, wiki.versionId]);
 
   const navigateToPage = (page: HubWikiPage) => {
-    setSelectedSlug(page.slug);
+    setManualSelectedSlug(page.slug);
+    onSessionChange({
+      ...session,
+      selectedSlug: page.slug,
+      expandedSections: [...new Set([...expandedSections, page.section])],
+    });
     setSourceState(null);
     setSourceError(null);
+  };
+
+  const toggleSection = (section: string) => {
+    const next = new Set(expandedSections);
+    if (next.has(section)) {
+      next.delete(section);
+    } else {
+      next.add(section);
+    }
+    onSessionChange({ ...session, expandedSections: [...next] });
+  };
+
+  const handleArticleScroll = () => {
+    if (articleRef.current) {
+      onSessionChange({ ...session, scrollTop: articleRef.current.scrollTop });
+    }
   };
 
   const openSource = async (path: string) => {
@@ -271,27 +357,71 @@ export function OpenZreadReader({ project, wiki, providerLabel, readSource, read
         </div>
         <button type="button" className="secondary-button" onClick={onClose}>Close Reader</button>
       </div>
+      {availableProviders.length > 0 && (
+        <div className="wiki-reader-provider-switcher" role="group" aria-label="Wiki Provider">
+          <span className="wiki-reader-switcher-label">Wiki Provider</span>
+          <div className="wiki-reader-provider-list">
+            {availableProviders.map((provider) => (
+              <button
+                key={provider}
+                type="button"
+                className={`wiki-reader-provider${provider === wiki.provider ? ' is-selected' : ''}`}
+                data-testid={`provider-switch-${provider}`}
+                aria-pressed={provider === wiki.provider}
+                disabled={provider === wiki.provider || switchingProvider}
+                onClick={() => onSwitchProvider(provider)}
+              >
+                {provider === 'zread' ? 'Zread' : 'OpenZread'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {wiki.status === 'partial' && (
         <p className="wiki-reader-warning" role="status">
           Some pages could not be read. Available pages remain open; select a page to inspect its local error.
         </p>
       )}
+      {selectedPageWasUnavailable && (
+        <p className="wiki-reader-warning" role="status">
+          The previously selected page is no longer readable in this Wiki. Showing the Wiki overview instead.
+        </p>
+      )}
       <div className="wiki-reader-layout">
         <nav className="wiki-reader-pages" aria-label={`${providerLabel} pages`}>
-          {wiki.pages.map((page) => (
-            <button
-              key={page.slug}
-              type="button"
-              className={`wiki-reader-page${page.slug === selectedPage?.slug ? ' is-selected' : ''}`}
-              data-testid={`wiki-page-nav-${page.slug}`}
-              onClick={() => navigateToPage(page)}
-            >
-              <span>{page.title}</span>
-              <small>{page.status}</small>
-            </button>
+          {sections.map(([section, pages], sectionIndex) => (
+            <div className="wiki-reader-section" key={section}>
+              <button
+                type="button"
+                className="wiki-reader-section-toggle"
+                data-testid={`wiki-section-toggle-${sectionIndex}`}
+                aria-expanded={expandedSections.has(section)}
+                onClick={() => toggleSection(section)}
+              >
+                <span>{section}</span>
+                <small>{expandedSections.has(section) ? '−' : '+'}</small>
+              </button>
+              {expandedSections.has(section) && pages.map((page) => (
+                <button
+                  key={page.slug}
+                  type="button"
+                  className={`wiki-reader-page${page.slug === selectedPage?.slug ? ' is-selected' : ''}`}
+                  data-testid={`wiki-page-nav-${page.slug}`}
+                  onClick={() => navigateToPage(page)}
+                >
+                  <span>{page.title}</span>
+                  <small>{page.status}</small>
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
-        <article className="wiki-reader-article">
+        <article
+          className="wiki-reader-article"
+          ref={articleRef}
+          onScroll={handleArticleScroll}
+          data-testid="wiki-reader-article"
+        >
           {selectedPage ? (
             <>
               <div className="wiki-reader-article-heading">

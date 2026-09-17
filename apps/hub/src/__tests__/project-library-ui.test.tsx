@@ -99,6 +99,16 @@ function createLibraryService(
               error: 'The Markdown page is missing.',
               native: { providerOnly: 'kept' },
             },
+            {
+              slug: 'details',
+              title: '补充说明',
+              file: 'details.md',
+              section: '附录',
+              associatedFiles: [],
+              status: 'readable',
+              content: '# 补充说明',
+              native: { providerOnly: 'details' },
+            },
           ],
         };
       }
@@ -293,6 +303,47 @@ describe('Project Library UI', () => {
     expect(renderer?.root.findByProps({ 'data-testid': 'wiki-page-overview' })).toBeDefined();
     expect(renderer?.root.findByProps({ className: 'wiki-reader-meta' }).children.join(' '))
       .toContain('versions/2026-09-17-120000');
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  test('switches Providers without mixing page position or directory expansion state', async () => {
+    const service = createLibraryService([], []);
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(<HubApp service={service} />);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'open-open-zread-project-1' }).props.onClick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'wiki-page-nav-details' }).props.onClick();
+    });
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'wiki-section-toggle-1' }).props.onClick();
+    });
+    expect(renderer?.root.findByProps({ 'data-testid': 'wiki-section-toggle-1' }).props['aria-expanded']).toBe(false);
+
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'provider-switch-zread' }).props.onClick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(renderer?.root.findByProps({ 'data-testid': 'zread-reader' })).toBeDefined();
+    expect(renderer?.root.findByProps({ 'data-testid': 'wiki-page-overview' })).toBeDefined();
+
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'provider-switch-open_zread' }).props.onClick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(renderer?.root.findByProps({ 'data-testid': 'open-zread-reader' })).toBeDefined();
+    expect(renderer?.root.findByProps({ 'data-testid': 'wiki-page-details' })).toBeDefined();
+    expect(renderer?.root.findByProps({ 'data-testid': 'wiki-section-toggle-1' }).props['aria-expanded']).toBe(false);
 
     await act(async () => {
       renderer?.unmount();
