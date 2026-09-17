@@ -9,6 +9,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::get_hub_health,
+            commands::set_hub_zread_executable,
             commands::cancel_hub_task,
             commands::list_hub_projects,
             commands::register_hub_project,

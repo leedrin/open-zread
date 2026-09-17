@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { HubHealth, HubProject, HubTaskEvent, HubWikiDocument, HubWikiProvider } from '@open-zread/hub-contract';
+import type {
+  HubHealth,
+  HubProject,
+  HubProviderHealth,
+  HubTaskEvent,
+  HubWikiDocument,
+  HubWikiProvider,
+} from '@open-zread/hub-contract';
 import {
   createHubApplicationService,
   type HubApplicationService,
@@ -63,6 +70,21 @@ function availableWikiProviders(project: HubProject): HubWikiProvider[] {
   });
 }
 
+function providerLabel(provider: HubProviderHealth['provider']): string {
+  return provider === 'open_zread' ? 'OpenZread' : 'Zread';
+}
+
+function configSourceLabel(source: HubProviderHealth['configSource']): string {
+  switch (source) {
+    case 'hub_shared':
+      return 'Hub shared config';
+    case 'zread_native':
+      return 'Zread native config';
+    default:
+      return 'Not configured';
+  }
+}
+
 function StarIcon({ filled }: { filled: boolean }) {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" focusable="false">
@@ -84,6 +106,8 @@ export function HubApp({ service = defaultService }: HubAppProps) {
   const [projectMessage, setProjectMessage] = useState<string | null>(null);
   const [projectQuery, setProjectQuery] = useState('');
   const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [zreadAction, setZreadAction] = useState<'idle' | 'selecting'>('idle');
+  const [providerMessage, setProviderMessage] = useState<string | null>(null);
   const [readerState, setReaderState] = useState<ReaderState>({ status: 'closed' });
   const [readerSessions, setReaderSessions] = useState<Record<string, WikiReaderSession>>({});
   const [lastTaskEvent, setLastTaskEvent] = useState<HubTaskEvent | null>(null);
@@ -91,6 +115,7 @@ export function HubApp({ service = defaultService }: HubAppProps) {
 
   const loadHealth = useCallback(async () => {
     setHealthState({ status: 'loading' });
+    setProviderMessage(null);
     try {
       const health = await service.getHealth();
       if (mountedRef.current) {
@@ -99,6 +124,25 @@ export function HubApp({ service = defaultService }: HubAppProps) {
     } catch (error) {
       if (mountedRef.current) {
         setHealthState({ status: 'error', message: errorMessage(error) });
+      }
+    }
+  }, [service]);
+
+  const configureZreadExecutable = useCallback(async () => {
+    setZreadAction('selecting');
+    setProviderMessage(null);
+    try {
+      const health = await service.configureZreadExecutable();
+      if (mountedRef.current && health) {
+        setHealthState({ status: 'ready', health });
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setProviderMessage(errorMessage(error));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setZreadAction('idle');
       }
     }
   }, [service]);
@@ -386,6 +430,7 @@ export function HubApp({ service = defaultService }: HubAppProps) {
           </div>
           <p data-testid="service-status" className="service-status">{statusLabel}</p>
           {healthState.status === 'ready' && (
+            <>
             <dl className="health-details">
               <div><dt>Version</dt><dd data-testid="app-version">{healthState.health.appVersion}</dd></div>
               <div><dt>Runtime</dt><dd>{healthState.health.runtime}</dd></div>
@@ -394,6 +439,66 @@ export function HubApp({ service = defaultService }: HubAppProps) {
               <div><dt>Runner version</dt><dd data-testid="runner-version">{healthState.health.runner.version}</dd></div>
               <div className="health-detail-path"><dt>Runner path</dt><dd data-testid="runner-path">{healthState.health.runner.executablePath}</dd></div>
             </dl>
+            <div className="provider-health-grid" aria-label="Provider health">
+              {healthState.health.providers.map((provider) => (
+                <article className="provider-health-card" data-testid={`provider-health-${provider.provider}`} key={provider.provider}>
+                  <div className="provider-health-heading">
+                    <h4>{providerLabel(provider.provider)}</h4>
+                    <span className={`availability-badge availability-${provider.generator.status}`}>
+                      {provider.generator.status}
+                    </span>
+                  </div>
+                  <dl className="provider-health-details">
+                    <div>
+                      <dt>Content</dt>
+                      <dd data-testid={`provider-${provider.provider}-content`}>Per project</dd>
+                    </div>
+                    <div>
+                      <dt>Generator</dt>
+                      <dd data-testid={`provider-${provider.provider}-generator-status`}>{provider.generator.status}</dd>
+                    </div>
+                    <div>
+                      <dt>Version</dt>
+                      <dd data-testid={`provider-${provider.provider}-version`}>{provider.generator.version}</dd>
+                    </div>
+                    <div className="health-detail-path">
+                      <dt>Executable path</dt>
+                      <dd data-testid={`provider-${provider.provider}-path`}>{provider.generator.executablePath}</dd>
+                    </div>
+                    <div>
+                      <dt>Config source</dt>
+                      <dd data-testid={`provider-${provider.provider}-config`}>{configSourceLabel(provider.configSource)}</dd>
+                    </div>
+                  </dl>
+                  <div className="provider-capabilities" aria-label={`${providerLabel(provider.provider)} capabilities`}>
+                    {(['generate', 'regenerate', 'sync'] as const).map((capability) => (
+                      <span className={`capability-badge ${provider.capabilities[capability] ? 'is-supported' : 'is-unsupported'}`} key={capability}>
+                        <span>{capability}</span>
+                        <strong data-testid={`provider-${provider.provider}-${capability}`}>
+                          {provider.capabilities[capability] ? 'Available' : 'Unsupported'}
+                        </strong>
+                      </span>
+                    ))}
+                  </div>
+                  {provider.provider === 'zread' && (
+                    <button
+                      type="button"
+                      className="secondary-button provider-configure-button"
+                      data-testid="select-zread-executable"
+                      disabled={zreadAction !== 'idle'}
+                      onClick={() => void configureZreadExecutable()}
+                    >
+                      {zreadAction === 'selecting' ? 'Selecting…' : 'Choose zread.exe'}
+                    </button>
+                  )}
+                  {provider.generator.diagnostics.length > 0 && (
+                    <p className="provider-diagnostics">{provider.generator.diagnostics.join(' ')}</p>
+                  )}
+                </article>
+              ))}
+            </div>
+            {providerMessage && <p className="error-message" role="alert">{providerMessage}</p>}
+            </>
           )}
           {healthState.status === 'error' && (
             <p className="error-message">{healthState.message}</p>

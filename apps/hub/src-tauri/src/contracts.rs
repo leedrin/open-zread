@@ -18,12 +18,56 @@ pub struct HubRunnerInfo {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HubProviderGeneratorHealth {
+    pub status: &'static str,
+    pub version: String,
+    pub executable_path: String,
+    pub executable_source: &'static str,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubProviderCapabilities {
+    pub generate: bool,
+    pub regenerate: bool,
+    pub sync: bool,
+    pub login: bool,
+    pub custom_api_key_login: bool,
+    pub machine_readable: bool,
+    pub unattended: bool,
+    pub existing_draft_actions: bool,
+    pub skip_failed_pages: bool,
+    pub cli_self_update: bool,
+    pub structured_progress: bool,
+    pub incremental_wiki_update: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubProviderHealth {
+    pub provider: &'static str,
+    pub content: HubProviderContentHealth,
+    pub generator: HubProviderGeneratorHealth,
+    pub capabilities: HubProviderCapabilities,
+    pub config_source: &'static str,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubProviderContentHealth {
+    pub status: &'static str,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HubHealth {
     pub app_version: &'static str,
     pub runtime: &'static str,
     pub os: &'static str,
     pub service: HubServiceHealth,
     pub runner: HubRunnerInfo,
+    pub providers: Vec<HubProviderHealth>,
 }
 
 #[derive(Clone, Serialize)]

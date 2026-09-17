@@ -151,6 +151,25 @@ h3 { margin-bottom: 8px; font-size: 16px; }
 .error-message { color: #b34949; font-size: 13px; line-height: 1.45; }
 .secondary-button { min-height: 36px; border: 1px solid var(--ui-border-strong); border-radius: 8px; padding: 8px 12px; color: var(--ui-ink); background: var(--ui-surface); cursor: pointer; }
 .secondary-button:hover { border-color: var(--ui-brand); background: var(--ui-brand-soft); }
+.provider-health-grid { display: grid; gap: 10px; margin: 0 0 20px; }
+.provider-health-card { border: 1px solid var(--ui-border); border-radius: 10px; padding: 12px; background: var(--ui-surface); }
+.provider-health-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.provider-health-heading h4 { margin: 0; color: var(--ui-ink); font-size: 14px; }
+.provider-health-details { display: grid; gap: 7px; margin: 0; }
+.provider-health-details div { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; }
+.provider-health-details dt { color: var(--ui-ink-muted); }
+.provider-health-details dd { margin: 0; color: var(--ui-ink-secondary); font-weight: 600; text-align: right; }
+.provider-health-details .health-detail-path { display: grid; gap: 3px; }
+.provider-health-details .health-detail-path dd { overflow-wrap: anywhere; }
+.availability-not_configured { color: #946517; background: var(--ui-warning-soft); }
+.provider-capabilities { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 11px; }
+.capability-badge { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 4px 7px; font-size: 10px; font-weight: 650; }
+.capability-badge span { text-transform: capitalize; }
+.capability-badge strong { font-weight: 700; }
+.capability-badge.is-supported { color: var(--ui-brand-strong); background: var(--ui-brand-soft); }
+.capability-badge.is-unsupported { color: var(--ui-ink-muted); background: var(--ui-surface-subtle); }
+.provider-configure-button { width: 100%; margin-top: 11px; min-height: 32px; padding: 6px 10px; font-size: 11px; }
+.provider-diagnostics { margin: 10px 0 0; color: #946517; font-size: 11px; line-height: 1.4; }
 
 .surface-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
 .surface-card { min-height: 170px; padding: 24px; background: rgba(255, 255, 255, .78); }

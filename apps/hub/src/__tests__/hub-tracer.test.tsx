@@ -22,6 +22,60 @@ const healthyResponse: HubHealth = {
     version: '1.2.2',
     executablePath: 'C:\\Program Files\\Open Zread Hub\\resources\\open-zread\\open-zread.exe',
   },
+  providers: [
+    {
+      provider: 'open_zread',
+      content: { status: 'project_scoped' },
+      generator: {
+        status: 'available',
+        version: '1.2.2',
+        executablePath: 'C:\\Program Files\\Open Zread Hub\\resources\\open-zread\\open-zread.exe',
+        executableSource: 'embedded',
+        diagnostics: [],
+      },
+      configSource: 'hub_shared',
+      capabilities: {
+        generate: true,
+        regenerate: true,
+        sync: false,
+        login: false,
+        customApiKeyLogin: false,
+        machineReadable: false,
+        unattended: false,
+        existingDraftActions: false,
+        skipFailedPages: false,
+        cliSelfUpdate: false,
+        structuredProgress: false,
+        incrementalWikiUpdate: false,
+      },
+    },
+    {
+      provider: 'zread',
+      content: { status: 'project_scoped' },
+      generator: {
+        status: 'available',
+        version: '0.2.13',
+        executablePath: 'C:\\Users\\Administrator\\AppData\\Roaming\\npm\\node_modules\\zread_cli\\node_modules\\@zread\\cli-win32-x64\\zread.exe',
+        executableSource: 'auto_detected',
+        diagnostics: [],
+      },
+      configSource: 'zread_native',
+      capabilities: {
+        generate: true,
+        regenerate: true,
+        sync: false,
+        login: true,
+        customApiKeyLogin: true,
+        machineReadable: true,
+        unattended: true,
+        existingDraftActions: true,
+        skipFailedPages: true,
+        cliSelfUpdate: true,
+        structuredProgress: true,
+        incrementalWikiUpdate: false,
+      },
+    },
+  ],
 };
 
 const registeredProject: HubProject = {
@@ -70,6 +124,9 @@ describe('Hub React to application-service tracer bullet', () => {
     expect(renderer?.root.findByProps({ 'data-testid': 'runner-path' }).children).toEqual([
       'C:\\Program Files\\Open Zread Hub\\resources\\open-zread\\open-zread.exe',
     ]);
+    expect(renderer?.root.findByProps({ 'data-testid': 'provider-health-zread' })).toBeDefined();
+    expect(renderer?.root.findByProps({ 'data-testid': 'provider-zread-generator-status' }).children).toEqual(['available']);
+    expect(renderer?.root.findByProps({ 'data-testid': 'provider-zread-sync' }).children).toEqual(['Unsupported']);
 
     const taskEvent: HubTaskEvent = {
       taskId: 'task-1',
@@ -120,6 +177,42 @@ describe('Hub React to application-service tracer bullet', () => {
       name: 'HubProtocolError',
       code: 'internal_error',
     });
+  });
+
+  test('rejects a health response without provider boundaries', async () => {
+    const transport: HubTransport = {
+      invoke: async () => ({ ...healthyResponse, providers: undefined }),
+      listen: async () => () => undefined,
+      selectProjectDirectory: async () => null,
+      copyText: async () => undefined,
+    };
+    const service = createHubApplicationService(transport);
+
+    await expect(service.getHealth()).rejects.toMatchObject({
+      name: 'HubProtocolError',
+      code: 'internal_error',
+    });
+  });
+
+  test('selects a native Zread executable without importing provider credentials', async () => {
+    const commands: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const transport: HubTransport = {
+      invoke: async (command, args) => {
+        commands.push({ command, args });
+        return healthyResponse;
+      },
+      listen: async () => () => undefined,
+      selectProjectDirectory: async () => null,
+      selectZreadExecutable: async () => 'C:\\Tools\\zread.exe',
+      copyText: async () => undefined,
+    };
+    const service = createHubApplicationService(transport);
+
+    await expect(service.configureZreadExecutable()).resolves.toEqual(healthyResponse);
+    expect(commands).toEqual([{
+      command: 'set_hub_zread_executable',
+      args: { executablePath: 'C:\\Tools\\zread.exe' },
+    }]);
   });
 
   test('lists projects, opens the native picker, and registers through typed commands', async () => {

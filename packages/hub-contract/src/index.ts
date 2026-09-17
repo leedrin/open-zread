@@ -7,6 +7,7 @@
 
 export const HUB_COMMANDS = {
   getHealth: 'get_hub_health',
+  setZreadExecutable: 'set_hub_zread_executable',
   cancelTask: 'cancel_hub_task',
   listProjects: 'list_hub_projects',
   registerProject: 'register_hub_project',
@@ -32,6 +33,9 @@ export type HubCommandName = typeof HUB_COMMANDS[keyof typeof HUB_COMMANDS];
 export type HubRuntime = 'tauri';
 export type HubServiceStatus = 'healthy' | 'degraded' | 'unavailable';
 export type HubRunnerStatus = 'available' | 'unavailable';
+export type HubProviderGeneratorStatus = 'available' | 'unavailable' | 'not_configured';
+export type HubProviderConfigSource = 'hub_shared' | 'zread_native' | 'not_configured';
+export type HubProviderExecutableSource = 'embedded' | 'auto_detected' | 'manual' | 'not_detected';
 
 export interface HubServiceHealth {
   name: 'Hub Application Service';
@@ -44,12 +48,46 @@ export interface HubRunnerInfo {
   executablePath: string;
 }
 
+export interface HubProviderGeneratorHealth {
+  status: HubProviderGeneratorStatus;
+  version: string;
+  executablePath: string;
+  executableSource: HubProviderExecutableSource;
+  diagnostics: string[];
+}
+
+export interface HubProviderCapabilities {
+  generate: boolean;
+  regenerate: boolean;
+  sync: boolean;
+  login: boolean;
+  customApiKeyLogin: boolean;
+  machineReadable: boolean;
+  unattended: boolean;
+  existingDraftActions: boolean;
+  skipFailedPages: boolean;
+  cliSelfUpdate: boolean;
+  structuredProgress: boolean;
+  incrementalWikiUpdate: boolean;
+}
+
+export interface HubProviderHealth {
+  provider: HubWikiProvider;
+  /** Content readability is evaluated against each registered project. */
+  content: { status: 'project_scoped' };
+  generator: HubProviderGeneratorHealth;
+  capabilities: HubProviderCapabilities;
+  /** Hub never imports or overwrites credentials from a native provider. */
+  configSource: HubProviderConfigSource;
+}
+
 export interface HubHealth {
   appVersion: string;
   runtime: HubRuntime;
   os: string;
   service: HubServiceHealth;
   runner: HubRunnerInfo;
+  providers: HubProviderHealth[];
 }
 
 export type HubProjectAvailability = 'available' | 'missing' | 'inaccessible' | 'permission_denied';

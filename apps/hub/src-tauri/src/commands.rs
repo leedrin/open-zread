@@ -1,7 +1,8 @@
 use crate::contracts::{
-    CancelTaskResponse, HubCommandError, HubHealth, HubOpenZreadWiki, HubProject, HubRunnerInfo,
-    HubServiceHealth, HubSourceFile, HubTaskEvent, HubWikiAsset, RegisterProjectResponse,
-    TASK_EVENT,
+    CancelTaskResponse, HubCommandError, HubHealth, HubOpenZreadWiki, HubProject,
+    HubProviderCapabilities, HubProviderContentHealth, HubProviderGeneratorHealth,
+    HubProviderHealth, HubRunnerInfo, HubServiceHealth, HubSourceFile, HubTaskEvent, HubWikiAsset,
+    RegisterProjectResponse, TASK_EVENT,
 };
 use crate::projects::{
     list_projects, open_project_folder, open_project_terminal, register_project, relocate_project,
@@ -11,15 +12,24 @@ use crate::reader::{
     read_open_zread_asset, read_open_zread_source, read_open_zread_wiki, read_zread_asset,
     read_zread_source, read_zread_wiki,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 
 const RUNNER_RESOURCE_DIR: &str = "open-zread";
 const RUNNER_EXECUTABLE: &str = "open-zread.exe";
 const RUNNER_MANIFEST: &str = "open-zread.manifest.json";
+const PROVIDER_SETTINGS_FILE: &str = "provider-settings.json";
+const ZREAD_NOT_DETECTED: &str = "Not detected";
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderSettings {
+    zread_executable: Option<String>,
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -124,6 +134,378 @@ fn inspect_runner(app: &AppHandle) -> HubRunnerInfo {
     }
 }
 
+fn unavailable_provider_capabilities() -> HubProviderCapabilities {
+    HubProviderCapabilities {
+        generate: false,
+        regenerate: false,
+        sync: false,
+        login: false,
+        custom_api_key_login: false,
+        machine_readable: false,
+        unattended: false,
+        existing_draft_actions: false,
+        skip_failed_pages: false,
+        cli_self_update: false,
+        structured_progress: false,
+        incremental_wiki_update: false,
+    }
+}
+
+fn open_zread_capabilities() -> HubProviderCapabilities {
+    // The embedded runner exposes the `wiki` generation command. It does not
+    // expose a verified incremental Sync command, so the Hub must not invent
+    // one in the UI.
+    HubProviderCapabilities {
+        generate: true,
+        regenerate: true,
+        sync: false,
+        login: false,
+        custom_api_key_login: false,
+        machine_readable: false,
+        unattended: false,
+        existing_draft_actions: false,
+        skip_failed_pages: false,
+        cli_self_update: false,
+        structured_progress: false,
+        incremental_wiki_update: false,
+    }
+}
+
+fn provider_content() -> HubProviderContentHealth {
+    HubProviderContentHealth {
+        status: "project_scoped",
+    }
+}
+
+fn open_zread_provider_health(runner: &HubRunnerInfo) -> HubProviderHealth {
+    HubProviderHealth {
+        provider: "open_zread",
+        content: provider_content(),
+        generator: HubProviderGeneratorHealth {
+            status: if runner.status == "available" {
+                "available"
+            } else {
+                "unavailable"
+            },
+            version: runner.version.clone(),
+            executable_path: runner.executable_path.clone(),
+            executable_source: "embedded",
+            diagnostics: if runner.status == "available" {
+                Vec::new()
+            } else {
+                vec!["The embedded OpenZread runner is unavailable.".to_string()]
+            },
+        },
+        capabilities: if runner.status == "available" {
+            open_zread_capabilities()
+        } else {
+            unavailable_provider_capabilities()
+        },
+        config_source: "hub_shared",
+    }
+}
+
+fn zread_command(executable: &Path, args: &[&str]) -> Result<Output, String> {
+    Command::new(executable)
+        .args(args)
+        .output()
+        .map_err(|error| format!("Unable to run Zread {}: {error}", args.join(" ")))
+}
+
+fn zread_version(stdout: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
+        .find_map(|value| {
+            value
+                .get("vm")
+                .and_then(|vm| vm.get("version"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .filter(|version| !version.trim().is_empty())
+}
+
+fn zread_output_diagnostics(label: &str, output: &Output) -> Vec<String> {
+    if output.status.success() {
+        return Vec::new();
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let details = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if details.is_empty() {
+        vec![format!(
+            "Zread {label} command failed with exit code {}.",
+            output.status.code().unwrap_or(-1)
+        )]
+    } else {
+        details
+            .into_iter()
+            .map(|line| format!("Zread {label}: {line}"))
+            .collect()
+    }
+}
+
+fn zread_cli_capabilities(
+    version: &str,
+    generate_help: &str,
+    login_help: &str,
+    update_help: &str,
+) -> HubProviderCapabilities {
+    let machine_readable = generate_help.contains("--stdio");
+    let generate = generate_help.contains("Generate wiki documentation");
+    HubProviderCapabilities {
+        generate,
+        regenerate: generate,
+        sync: false,
+        login: login_help.contains("Login flow"),
+        custom_api_key_login: login_help.contains("--custom"),
+        machine_readable,
+        unattended: generate_help.contains("--yes"),
+        existing_draft_actions: generate_help.contains("--draft"),
+        skip_failed_pages: generate_help.contains("--skip-failed"),
+        cli_self_update: update_help.contains("Update Zread to the latest version"),
+        structured_progress: machine_readable && version == "0.2.13",
+        incremental_wiki_update: false,
+    }
+}
+
+fn native_zread_executable(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+}
+
+fn zread_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(output) = Command::new("where.exe").arg("zread.exe").output() {
+        candidates.extend(
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from),
+        );
+    }
+    for variable in ["APPDATA", "LOCALAPPDATA"] {
+        if let Ok(root) = std::env::var(variable) {
+            candidates.push(
+                PathBuf::from(root)
+                    .join("npm")
+                    .join("node_modules")
+                    .join("zread_cli")
+                    .join("node_modules")
+                    .join("@zread")
+                    .join("cli-win32-x64")
+                    .join("zread.exe"),
+            );
+        }
+    }
+    candidates
+}
+
+fn discover_zread_executable() -> Option<PathBuf> {
+    zread_candidates()
+        .into_iter()
+        .find(|candidate| native_zread_executable(candidate))
+}
+
+fn provider_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|directory| directory.join(PROVIDER_SETTINGS_FILE))
+        .map_err(|error| format!("Unable to resolve Hub provider settings: {error}"))
+}
+
+fn configured_zread_executable(app: &AppHandle) -> (Option<(PathBuf, &'static str)>, Vec<String>) {
+    let Ok(path) = provider_settings_path(app) else {
+        return (
+            discover_zread_executable().map(|path| (path, "auto_detected")),
+            vec!["Hub provider settings are unavailable; using automatic detection.".to_string()],
+        );
+    };
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return (
+                discover_zread_executable().map(|path| (path, "auto_detected")),
+                Vec::new(),
+            )
+        }
+        Err(error) => {
+            return (
+                discover_zread_executable().map(|path| (path, "auto_detected")),
+                vec![format!("Unable to read Hub provider settings: {error}")],
+            )
+        }
+    };
+    match serde_json::from_str::<ProviderSettings>(&contents) {
+        Ok(settings) => settings
+            .zread_executable
+            .filter(|path| !path.trim().is_empty())
+            .map(|path| (PathBuf::from(path), "manual"))
+            .map_or_else(
+                || {
+                    (
+                        discover_zread_executable().map(|path| (path, "auto_detected")),
+                        Vec::new(),
+                    )
+                },
+                |path| (Some(path), Vec::new()),
+            ),
+        Err(error) => (
+            discover_zread_executable().map(|path| (path, "auto_detected")),
+            vec![format!("Hub provider settings are invalid: {error}")],
+        ),
+    }
+}
+
+fn inspect_zread_provider(
+    executable: Option<(PathBuf, &'static str)>,
+    mut diagnostics: Vec<String>,
+) -> HubProviderHealth {
+    let Some((path, executable_source)) = executable else {
+        diagnostics.push(
+            "No native zread.exe was detected. Choose the executable path to configure Zread."
+                .to_string(),
+        );
+        return HubProviderHealth {
+            provider: "zread",
+            content: provider_content(),
+            generator: HubProviderGeneratorHealth {
+                status: "not_configured",
+                version: "unknown".to_string(),
+                executable_path: ZREAD_NOT_DETECTED.to_string(),
+                executable_source: "not_detected",
+                diagnostics,
+            },
+            capabilities: unavailable_provider_capabilities(),
+            config_source: "not_configured",
+        };
+    };
+
+    let executable_path = path.to_string_lossy().into_owned();
+    let mut version = "unknown".to_string();
+    let mut capabilities = unavailable_provider_capabilities();
+    let mut status = "unavailable";
+
+    if !native_zread_executable(&path) {
+        diagnostics.push("The configured path is not an existing native zread.exe.".to_string());
+    } else {
+        match zread_command(&path, &["version", "--stdio"]) {
+            Ok(output) if output.status.success() => {
+                if let Some(detected_version) = zread_version(&output.stdout) {
+                    version = detected_version;
+                    let checks = [
+                        ("generate", ["generate", "--help"].as_slice()),
+                        ("login", ["login", "--help"].as_slice()),
+                        ("update", ["update", "--help"].as_slice()),
+                    ];
+                    let mut help_outputs = Vec::new();
+                    for (label, args) in checks {
+                        match zread_command(&path, args) {
+                            Ok(output) => {
+                                diagnostics.extend(zread_output_diagnostics(label, &output));
+                                help_outputs.push(output);
+                            }
+                            Err(error) => diagnostics.push(error),
+                        }
+                    }
+                    if help_outputs.len() == 3 && diagnostics.is_empty() {
+                        let generate_help = String::from_utf8_lossy(&help_outputs[0].stdout);
+                        let login_help = String::from_utf8_lossy(&help_outputs[1].stdout);
+                        let update_help = String::from_utf8_lossy(&help_outputs[2].stdout);
+                        capabilities = zread_cli_capabilities(
+                            &version,
+                            &generate_help,
+                            &login_help,
+                            &update_help,
+                        );
+                        status = "available";
+                    }
+                } else {
+                    diagnostics.push(
+                        "Zread version output did not contain machine-readable version data."
+                            .to_string(),
+                    );
+                }
+            }
+            Ok(output) => diagnostics.extend(zread_output_diagnostics("version", &output)),
+            Err(error) => diagnostics.push(error),
+        }
+    }
+
+    HubProviderHealth {
+        provider: "zread",
+        content: provider_content(),
+        generator: HubProviderGeneratorHealth {
+            status,
+            version,
+            executable_path,
+            executable_source,
+            diagnostics,
+        },
+        capabilities,
+        config_source: "zread_native",
+    }
+}
+
+fn save_zread_executable(app: &AppHandle, executable: &Path) -> Result<(), HubCommandError> {
+    let path = provider_settings_path(app).map_err(|message| HubCommandError {
+        code: "internal_error",
+        message,
+        retryable: true,
+    })?;
+    let directory = path.parent().ok_or_else(|| HubCommandError {
+        code: "internal_error",
+        message: "Unable to resolve Hub provider settings directory.".to_string(),
+        retryable: true,
+    })?;
+    std::fs::create_dir_all(directory).map_err(|error| HubCommandError {
+        code: "internal_error",
+        message: format!("Unable to create Hub provider settings: {error}"),
+        retryable: true,
+    })?;
+    let contents = serde_json::to_string_pretty(&ProviderSettings {
+        zread_executable: Some(executable.to_string_lossy().into_owned()),
+    })
+    .map_err(|error| HubCommandError {
+        code: "internal_error",
+        message: format!("Unable to serialize Hub provider settings: {error}"),
+        retryable: true,
+    })?;
+    std::fs::write(path, contents).map_err(|error| HubCommandError {
+        code: "internal_error",
+        message: format!("Unable to persist Hub provider settings: {error}"),
+        retryable: true,
+    })
+}
+
+fn build_hub_health(app: &AppHandle) -> HubHealth {
+    let runner = inspect_runner(app);
+    let (zread_executable, diagnostics) = configured_zread_executable(app);
+    HubHealth {
+        app_version: env!("CARGO_PKG_VERSION"),
+        runtime: "tauri",
+        os: std::env::consts::OS,
+        service: HubServiceHealth {
+            name: "Hub Application Service",
+            status: "healthy",
+        },
+        providers: vec![
+            open_zread_provider_health(&runner),
+            inspect_zread_provider(zread_executable, diagnostics),
+        ],
+        runner,
+    }
+}
+
 pub(crate) fn emit_task_event(app: &AppHandle, event: HubTaskEvent) -> Result<(), HubCommandError> {
     app.emit(TASK_EVENT, event)
         .map_err(|error| HubCommandError {
@@ -137,16 +519,7 @@ pub(crate) fn emit_task_event(app: &AppHandle, event: HubTaskEvent) -> Result<()
 /// not in React and not in the transport handlers.
 #[tauri::command]
 pub fn get_hub_health(app: AppHandle) -> HubHealth {
-    let health = HubHealth {
-        app_version: env!("CARGO_PKG_VERSION"),
-        runtime: "tauri",
-        os: std::env::consts::OS,
-        service: HubServiceHealth {
-            name: "Hub Application Service",
-            status: "healthy",
-        },
-        runner: inspect_runner(&app),
-    };
+    let health = build_hub_health(&app);
 
     // The foundation command also proves that a typed task event can travel
     // from the Tauri application service to React. Real generation commands
@@ -168,6 +541,24 @@ pub fn get_hub_health(app: AppHandle) -> HubHealth {
     );
 
     health
+}
+
+#[tauri::command]
+pub fn set_hub_zread_executable(
+    app: AppHandle,
+    executable_path: String,
+) -> Result<HubHealth, HubCommandError> {
+    let trimmed = executable_path.trim();
+    let path = PathBuf::from(trimmed);
+    if trimmed.is_empty() || !path.is_absolute() || !native_zread_executable(&path) {
+        return Err(HubCommandError {
+            code: "invalid_request",
+            message: "An existing absolute native zread.exe path is required.".to_string(),
+            retryable: false,
+        });
+    }
+    save_zread_executable(&app, &path)?;
+    Ok(build_hub_health(&app))
 }
 
 #[tauri::command]
@@ -370,5 +761,45 @@ mod tests {
         assert_eq!(manifest_version(None), None);
 
         remove_dir_all(root).expect("test runner directory should be removed");
+    }
+
+    #[test]
+    fn parses_machine_readable_zread_version_output() {
+        let stdout = br#"noise
+{"vm":{"version":"0.2.13","channel":"npm","go_version":"go1.26.0","os":"windows","arch":"amd64"},"done":true}
+"#;
+
+        assert_eq!(zread_version(stdout).as_deref(), Some("0.2.13"));
+    }
+
+    #[test]
+    fn exposes_only_capabilities_verified_by_zread_help_output() {
+        let capabilities = zread_cli_capabilities(
+            "0.2.13",
+            "Generate wiki documentation\n--stdio\n--yes\n--draft\n--skip-failed",
+            "Login flow\n--custom",
+            "Update Zread to the latest version",
+        );
+
+        assert!(capabilities.generate);
+        assert!(capabilities.regenerate);
+        assert!(capabilities.login);
+        assert!(capabilities.custom_api_key_login);
+        assert!(capabilities.machine_readable);
+        assert!(capabilities.structured_progress);
+        assert!(!capabilities.sync);
+        assert!(!capabilities.incremental_wiki_update);
+    }
+
+    #[test]
+    fn native_zread_detection_requires_an_existing_exe() {
+        let root = test_runner_root();
+        let executable = root.join("zread.exe");
+        write(&executable, b"test executable").expect("test zread executable should be created");
+
+        assert!(native_zread_executable(&executable));
+        assert!(!native_zread_executable(&root.join("zread.cmd")));
+
+        remove_dir_all(root).expect("test zread directory should be removed");
     }
 }

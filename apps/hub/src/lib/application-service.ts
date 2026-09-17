@@ -21,6 +21,9 @@ import {
   type HubSourceControl,
   type HubWikiStatus,
   type HubRunnerInfo,
+  type HubProviderCapabilities,
+  type HubProviderHealth,
+  type HubProviderGeneratorHealth,
   type HubTaskEvent,
   type RegisterProjectResponse,
 } from '@open-zread/hub-contract';
@@ -41,11 +44,13 @@ export interface HubTransport {
   invoke(command: HubCommandName, args?: Record<string, unknown>): Promise<unknown>;
   listen(event: typeof HUB_EVENTS.task, listener: HubEventListener<unknown>): Promise<Unsubscribe>;
   selectProjectDirectory(): Promise<string | null>;
+  selectZreadExecutable?(): Promise<string | null>;
   copyText(text: string): Promise<void>;
 }
 
 export interface HubApplicationService {
   getHealth(): Promise<HubHealth>;
+  configureZreadExecutable(): Promise<HubHealth | null>;
   listProjects(): Promise<HubProject[]>;
   selectProjectDirectory(): Promise<string | null>;
   registerProject(path: string): Promise<RegisterProjectResponse>;
@@ -79,6 +84,14 @@ const tauriTransport: HubTransport = {
       recursive: false,
       title: 'Select a local project',
     });
+  },
+  selectZreadExecutable() {
+    return tauriOpen({
+      directory: false,
+      multiple: false,
+      title: 'Select native zread.exe',
+      filters: [{ name: 'Native Zread executable', extensions: ['exe'] }],
+    }) as Promise<string | null>;
   },
   copyText(text) {
     return tauriWriteText(text);
@@ -121,6 +134,96 @@ function parseRunnerInfo(value: unknown): HubRunnerInfo {
   };
 }
 
+const PROVIDERS = ['open_zread', 'zread'] as const;
+const PROVIDER_GENERATOR_STATUSES = ['available', 'unavailable', 'not_configured'] as const;
+const PROVIDER_CONFIG_SOURCES = ['hub_shared', 'zread_native', 'not_configured'] as const;
+const PROVIDER_EXECUTABLE_SOURCES = ['embedded', 'auto_detected', 'manual', 'not_detected'] as const;
+const PROVIDER_CAPABILITY_KEYS: (keyof HubProviderCapabilities)[] = [
+  'generate',
+  'regenerate',
+  'sync',
+  'login',
+  'customApiKeyLogin',
+  'machineReadable',
+  'unattended',
+  'existingDraftActions',
+  'skipFailedPages',
+  'cliSelfUpdate',
+  'structuredProgress',
+  'incrementalWikiUpdate',
+];
+
+function parseProviderGenerator(value: unknown): HubProviderGeneratorHealth {
+  if (!isRecord(value)) {
+    throw new HubProtocolError('Invalid Hub response: provider generator payload is malformed.');
+  }
+  const status = requiredString(value.status, 'provider.generator.status');
+  const executableSource = requiredString(value.executableSource, 'provider.generator.executableSource');
+  if (!PROVIDER_GENERATOR_STATUSES.includes(status as typeof PROVIDER_GENERATOR_STATUSES[number])) {
+    throw new HubProtocolError('Invalid Hub response: unknown provider generator status.');
+  }
+  if (!PROVIDER_EXECUTABLE_SOURCES.includes(executableSource as typeof PROVIDER_EXECUTABLE_SOURCES[number])) {
+    throw new HubProtocolError('Invalid Hub response: unknown provider executable source.');
+  }
+  if (!Array.isArray(value.diagnostics) || value.diagnostics.some((diagnostic) => typeof diagnostic !== 'string')) {
+    throw new HubProtocolError('Invalid Hub response: provider diagnostics are malformed.');
+  }
+  return {
+    status: status as HubProviderGeneratorHealth['status'],
+    version: requiredString(value.version, 'provider.generator.version'),
+    executablePath: requiredString(value.executablePath, 'provider.generator.executablePath'),
+    executableSource: executableSource as HubProviderGeneratorHealth['executableSource'],
+    diagnostics: value.diagnostics,
+  };
+}
+
+function parseProviderCapabilities(value: unknown): HubProviderCapabilities {
+  if (!isRecord(value) || PROVIDER_CAPABILITY_KEYS.some((key) => typeof value[key] !== 'boolean')) {
+    throw new HubProtocolError('Invalid Hub response: provider capabilities are malformed.');
+  }
+  const capabilities = {} as HubProviderCapabilities;
+  for (const key of PROVIDER_CAPABILITY_KEYS) {
+    capabilities[key] = value[key] as boolean;
+  }
+  return capabilities;
+}
+
+function parseProviderHealth(value: unknown): HubProviderHealth {
+  if (!isRecord(value) || !isRecord(value.content)) {
+    throw new HubProtocolError('Invalid Hub response: provider health payload is malformed.');
+  }
+  const provider = requiredString(value.provider, 'provider.provider');
+  const configSource = requiredString(value.configSource, 'provider.configSource');
+  if (!PROVIDERS.includes(provider as typeof PROVIDERS[number])) {
+    throw new HubProtocolError('Invalid Hub response: unknown provider.');
+  }
+  if (value.content.status !== 'project_scoped') {
+    throw new HubProtocolError('Invalid Hub response: unknown provider content scope.');
+  }
+  if (!PROVIDER_CONFIG_SOURCES.includes(configSource as typeof PROVIDER_CONFIG_SOURCES[number])) {
+    throw new HubProtocolError('Invalid Hub response: unknown provider config source.');
+  }
+  return {
+    provider: provider as HubProviderHealth['provider'],
+    content: { status: 'project_scoped' },
+    generator: parseProviderGenerator(value.generator),
+    capabilities: parseProviderCapabilities(value.capabilities),
+    configSource: configSource as HubProviderHealth['configSource'],
+  };
+}
+
+function parseProviders(value: unknown): HubProviderHealth[] {
+  if (!Array.isArray(value) || value.length !== PROVIDERS.length) {
+    throw new HubProtocolError('Invalid Hub response: provider health list is malformed.');
+  }
+  const providers = value.map(parseProviderHealth);
+  if (new Set(providers.map((provider) => provider.provider)).size !== PROVIDERS.length
+    || !PROVIDERS.every((provider) => providers.some((candidate) => candidate.provider === provider))) {
+    throw new HubProtocolError('Invalid Hub response: provider health list is incomplete.');
+  }
+  return providers;
+}
+
 function parseHealth(value: unknown): HubHealth {
   if (!isRecord(value) || !isRecord(value.service)) {
     throw new HubProtocolError('Invalid Hub response: health payload is malformed.');
@@ -139,6 +242,7 @@ function parseHealth(value: unknown): HubHealth {
     runtime,
     os: requiredString(value.os, 'os'),
     runner: parseRunnerInfo(value.runner),
+    providers: parseProviders(value.providers),
     service: {
       name: 'Hub Application Service',
       status: status as HubHealth['service']['status'],
@@ -398,6 +502,22 @@ export function createHubApplicationService(
   return {
     getHealth() {
       return transport.invoke(HUB_COMMANDS.getHealth).then(parseHealth);
+    },
+
+    configureZreadExecutable() {
+      if (!transport.selectZreadExecutable) {
+        return Promise.reject(new HubProtocolError('Zread executable selection is unavailable in this runtime.'));
+      }
+      return transport.selectZreadExecutable().then((path) => {
+        if (path === null) {
+          return null;
+        }
+        if (typeof path !== 'string' || path.trim().length === 0) {
+          throw new HubProtocolError('Invalid Hub response: selected Zread executable path is malformed.');
+        }
+        return transport.invoke(HUB_COMMANDS.setZreadExecutable, { executablePath: path.trim() })
+          .then(parseHealth);
+      });
     },
 
     listProjects() {
