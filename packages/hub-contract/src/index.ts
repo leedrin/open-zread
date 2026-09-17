@@ -18,6 +18,10 @@ export const HUB_COMMANDS = {
   createWikiPage: 'create_hub_wiki_page',
   deleteWikiPage: 'delete_hub_wiki_page',
   updateWikiPageMetadata: 'update_hub_wiki_page_metadata',
+  mergeWikiText: 'merge_hub_wiki_text',
+  askWiki: 'ask_hub_wiki',
+  rewriteWikiPage: 'rewrite_hub_wiki_page',
+  draftWikiPage: 'draft_hub_wiki_page',
   cancelTask: 'cancel_hub_task',
   listProjects: 'list_hub_projects',
   registerProject: 'register_hub_project',
@@ -262,6 +266,42 @@ export interface HubWikiPageMutationResponse {
   slug: string;
   action: HubWikiPageMutationAction;
   relativePath: string;
+}
+
+export type HubWikiMergeStatus = 'clean' | 'conflicted';
+
+export interface HubWikiMergeConflict {
+  base: string;
+  local: string;
+  incoming: string;
+}
+
+export interface HubWikiMergeResponse {
+  status: HubWikiMergeStatus;
+  content: string;
+  conflicts: HubWikiMergeConflict[];
+}
+
+export interface HubWikiAnswerReference {
+  slug: string;
+  title: string;
+}
+
+export interface HubWikiAnswerResponse {
+  projectId: string;
+  provider: HubWikiProvider;
+  slug: string;
+  answer: string;
+  references: HubWikiAnswerReference[];
+}
+
+export interface HubWikiPageDraftResponse {
+  provider: HubWikiProvider;
+  slug: string;
+  title: string;
+  section: string;
+  content: string;
+  associatedFiles: string[];
 }
 
 export const HUB_TASK_KINDS = ['generation', 'update', 'maintenance'] as const;

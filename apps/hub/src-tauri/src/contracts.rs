@@ -278,6 +278,72 @@ pub struct HubWikiPageMutationResponse {
     pub relative_path: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiMergeConflict {
+    pub base: String,
+    pub local: String,
+    pub incoming: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiMergeResponse {
+    pub status: &'static str,
+    pub content: String,
+    pub conflicts: Vec<HubWikiMergeConflict>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiAnswerReference {
+    pub slug: String,
+    pub title: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiAnswerResponse {
+    pub project_id: String,
+    pub provider: &'static str,
+    pub slug: String,
+    pub answer: String,
+    pub references: Vec<HubWikiAnswerReference>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiPageDraftResponse {
+    pub provider: &'static str,
+    pub slug: String,
+    pub title: String,
+    pub section: String,
+    pub content: String,
+    pub associated_files: Vec<String>,
+}
+
+impl HubWikiMergeResponse {
+    pub(crate) fn clean(content: &str) -> Self {
+        Self {
+            status: "clean",
+            content: content.to_string(),
+            conflicts: Vec::new(),
+        }
+    }
+
+    pub(crate) fn conflicted(local: &str, incoming: &str, base: &str) -> Self {
+        Self {
+            status: "conflicted",
+            content: local.to_string(),
+            conflicts: vec![HubWikiMergeConflict {
+                base: base.to_string(),
+                local: local.to_string(),
+                incoming: incoming.to_string(),
+            }],
+        }
+    }
+}
+
 pub const TASK_EVENT: &str = "hub://task-event";
 
 #[cfg(test)]

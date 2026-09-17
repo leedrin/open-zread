@@ -31,6 +31,9 @@ import {
   type HubWikiHistoryEntry,
   type HubWikiSearchResponse,
   type HubWikiPageMutationResponse,
+  type HubWikiMergeResponse,
+  type HubWikiAnswerResponse,
+  type HubWikiPageDraftResponse,
   type RegisterProjectResponse,
 } from '@open-zread/hub-contract';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
@@ -60,6 +63,8 @@ export interface UpdateWikiPageMetadataInput {
   section?: string;
   group?: string;
   associatedFiles?: string[];
+  order?: number;
+  clearGroup?: boolean;
 }
 
 /** The transport is the only place the application service knows about Tauri. */
@@ -104,6 +109,27 @@ export interface HubApplicationService {
     slug: string,
     input: UpdateWikiPageMetadataInput,
   ): Promise<HubWikiPageMutationResponse>;
+  mergeWikiText(base: string, local: string, incoming: string): Promise<HubWikiMergeResponse>;
+  askWiki(
+    projectId: string,
+    provider: HubWikiProvider,
+    slug: string,
+    question: string,
+    selectedText?: string,
+  ): Promise<HubWikiAnswerResponse>;
+  rewriteWikiPage(
+    projectId: string,
+    provider: HubWikiProvider,
+    slug: string,
+    instruction: string,
+    sectionHeading?: string,
+  ): Promise<HubWikiChangeSet>;
+  draftWikiPage(
+    projectId: string,
+    provider: HubWikiProvider,
+    topic: string,
+    section?: string,
+  ): Promise<HubWikiPageDraftResponse>;
   cancelTask(taskId: string): Promise<CancelTaskResponse>;
   subscribeToTaskEvents(listener: (event: HubTaskEvent) => void): Promise<Unsubscribe>;
 }
@@ -652,6 +678,62 @@ function parseWikiPageMutationResponse(value: unknown): HubWikiPageMutationRespo
   };
 }
 
+function parseMergeResponse(value: unknown): HubWikiMergeResponse {
+  if (!isRecord(value) || (value.status !== 'clean' && value.status !== 'conflicted')
+    || typeof value.content !== 'string' || !Array.isArray(value.conflicts)) {
+    throw new HubProtocolError('Invalid Hub response: Wiki merge payload is malformed.');
+  }
+  const conflicts = value.conflicts.map((conflict) => {
+    if (!isRecord(conflict)
+      || typeof conflict.base !== 'string'
+      || typeof conflict.local !== 'string'
+      || typeof conflict.incoming !== 'string') {
+      throw new HubProtocolError('Invalid Hub response: Wiki merge conflict is malformed.');
+    }
+    return { base: conflict.base, local: conflict.local, incoming: conflict.incoming };
+  });
+  return { status: value.status, content: value.content, conflicts };
+}
+
+function parseAnswerResponse(value: unknown): HubWikiAnswerResponse {
+  if (!isRecord(value) || (value.provider !== 'open_zread' && value.provider !== 'zread')
+    || !Array.isArray(value.references)) {
+    throw new HubProtocolError('Invalid Hub response: Wiki answer payload is malformed.');
+  }
+  const references = value.references.map((reference) => {
+    if (!isRecord(reference)) {
+      throw new HubProtocolError('Invalid Hub response: Wiki answer reference is malformed.');
+    }
+    return {
+      slug: requiredString(reference.slug, 'answer.reference.slug'),
+      title: requiredString(reference.title, 'answer.reference.title'),
+    };
+  });
+  return {
+    projectId: requiredString(value.projectId, 'answer.projectId'),
+    provider: value.provider,
+    slug: requiredString(value.slug, 'answer.slug'),
+    answer: requiredString(value.answer, 'answer.answer'),
+    references,
+  };
+}
+
+function parsePageDraftResponse(value: unknown): HubWikiPageDraftResponse {
+  if (!isRecord(value) || (value.provider !== 'open_zread' && value.provider !== 'zread')
+    || !Array.isArray(value.associatedFiles)
+    || value.associatedFiles.some((path) => typeof path !== 'string')) {
+    throw new HubProtocolError('Invalid Hub response: Wiki page draft payload is malformed.');
+  }
+  return {
+    provider: value.provider,
+    slug: requiredString(value.slug, 'draft.slug'),
+    title: requiredString(value.title, 'draft.title'),
+    section: requiredString(value.section, 'draft.section'),
+    content: requiredString(value.content, 'draft.content'),
+    associatedFiles: value.associatedFiles,
+  };
+}
+
 /**
  * Create the typed client used by React and future Tauri command adapters.
  * React never receives a filesystem or process capability from this boundary.
@@ -988,7 +1070,12 @@ export function createHubApplicationService(
         ...(input.section?.trim() ? { section: input.section.trim() } : {}),
         ...(input.group?.trim() ? { group: input.group.trim() } : {}),
         ...(input.associatedFiles !== undefined ? { associatedFiles: input.associatedFiles } : {}),
+        ...(input.order !== undefined ? { order: input.order } : {}),
+        ...(input.clearGroup ? { clearGroup: true } : {}),
       };
+      if (input.order !== undefined && (!Number.isInteger(input.order) || input.order < 0)) {
+        return invalidRequest('Page order must be a non-negative integer.');
+      }
       if (Object.keys(normalizedInput).length === 0) {
         return invalidRequest('At least one page metadata field is required.');
       }
@@ -998,6 +1085,68 @@ export function createHubApplicationService(
         slug: normalizedSlug,
         ...normalizedInput,
       }).then(parseWikiPageMutationResponse);
+    },
+
+    mergeWikiText(base, local, incoming) {
+      if (!base && !local && !incoming) {
+        return invalidRequest('At least one Wiki revision is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.mergeWikiText, { base, local, incoming }).then(parseMergeResponse);
+    },
+
+    askWiki(projectId, provider, slug, question, selectedText) {
+      const normalizedId = projectId.trim();
+      const normalizedSlug = slug.trim();
+      const normalizedQuestion = question.trim();
+      if (!normalizedId || !normalizedSlug || !normalizedQuestion) {
+        return invalidRequest('Project id, page slug, and question are required.');
+      }
+      if (provider !== 'open_zread' && provider !== 'zread') {
+        return invalidRequest('Wiki provider is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.askWiki, {
+        projectId: normalizedId,
+        provider,
+        slug: normalizedSlug,
+        question: normalizedQuestion,
+        ...(selectedText?.trim() ? { selectedText: selectedText.trim() } : {}),
+      }).then(parseAnswerResponse);
+    },
+
+    rewriteWikiPage(projectId, provider, slug, instruction, sectionHeading) {
+      const normalizedId = projectId.trim();
+      const normalizedSlug = slug.trim();
+      const normalizedInstruction = instruction.trim();
+      if (!normalizedId || !normalizedSlug || !normalizedInstruction) {
+        return invalidRequest('Project id, page slug, and rewrite instruction are required.');
+      }
+      if (provider !== 'open_zread' && provider !== 'zread') {
+        return invalidRequest('Wiki provider is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.rewriteWikiPage, {
+        projectId: normalizedId,
+        provider,
+        slug: normalizedSlug,
+        instruction: normalizedInstruction,
+        ...(sectionHeading?.trim() ? { sectionHeading: sectionHeading.trim() } : {}),
+      }).then(parseChangeSet);
+    },
+
+    draftWikiPage(projectId, provider, topic, section) {
+      const normalizedId = projectId.trim();
+      const normalizedTopic = topic.trim();
+      if (!normalizedId || !normalizedTopic) {
+        return invalidRequest('Project id and page topic are required.');
+      }
+      if (provider !== 'open_zread' && provider !== 'zread') {
+        return invalidRequest('Wiki provider is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.draftWikiPage, {
+        projectId: normalizedId,
+        provider,
+        topic: normalizedTopic,
+        ...(section?.trim() ? { section: section.trim() } : {}),
+      }).then(parsePageDraftResponse);
     },
 
     cancelTask(taskId) {

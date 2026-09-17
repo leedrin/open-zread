@@ -6,6 +6,7 @@ import {
   type ArticleEventPayload,
   type CatalogEvent,
 } from '@open-zread/orchestrator';
+import { createProvider } from '@open-zread/agent-sdk';
 import {
   getWikiDir,
   loadConfig,
@@ -13,7 +14,29 @@ import {
 } from '@open-zread/utils';
 import type { WikiPage } from '@open-zread/types';
 
-export type OpenZreadStdioOperation = 'generate' | 'sync';
+export type OpenZreadStdioOperation = 'generate' | 'sync' | 'ask' | 'rewrite' | 'draft';
+
+export interface OpenZreadAskInput {
+  question: string;
+  pageTitle?: string;
+  pageSlug?: string;
+  pageContent?: string;
+  selectedText?: string;
+}
+
+export interface OpenZreadRewriteInput {
+  instruction: string;
+  pageTitle?: string;
+  pageSlug?: string;
+  pageContent: string;
+  sectionHeading?: string;
+}
+
+export interface OpenZreadDraftInput {
+  topic: string;
+  section?: string;
+  existingSections?: string[];
+}
 
 export interface OpenZreadStdioEvent {
   kind: 'generation';
@@ -131,6 +154,147 @@ async function readConfiguredConcurrency(): Promise<number> {
     : 1;
 }
 
+function askSystemPrompt(input: OpenZreadAskInput): string {
+  return [
+    'You are a documentation reading assistant for a local Wiki.',
+    'Answer primarily from the supplied page context and selected text.',
+    'If the context is insufficient, say what is missing instead of guessing.',
+    'Do not claim access to files or runtime state beyond the supplied context.',
+    input.pageTitle || input.pageSlug
+      ? `Current page: ${input.pageTitle ?? 'Untitled'}${input.pageSlug ? ` (${input.pageSlug})` : ''}`
+      : undefined,
+    input.selectedText ? `Selected text:\n${input.selectedText}` : undefined,
+    input.pageContent ? `Page content:\n${input.pageContent}` : undefined,
+  ].filter((value): value is string => Boolean(value)).join('\n\n');
+}
+
+async function runAskStdio(input: OpenZreadAskInput): Promise<void> {
+  if (!input.question?.trim()) {
+    throw new Error('A question is required.');
+  }
+  const config = await loadConfig();
+  if (!config.llm.provider || !config.llm.model || !config.llm.api_key) {
+    throw new Error('OpenZread model configuration is incomplete; configure the Hub shared model first.');
+  }
+  const provider = createProvider(config.llm.provider, {
+    apiKey: config.llm.api_key,
+    baseURL: config.llm.base_url ?? undefined,
+  });
+  const response = await provider.createMessage({
+    model: config.llm.model,
+    maxTokens: 1200,
+    system: askSystemPrompt(input),
+    messages: [{ role: 'user', content: input.question.trim() }],
+  });
+  const answer = response.content
+    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n')
+    .trim();
+  process.stdout.write(`${JSON.stringify({
+    kind: 'qa',
+    status: 'succeeded',
+    answer: answer || 'The model returned no displayable text.',
+    references: input.pageSlug ? [{ slug: input.pageSlug, title: input.pageTitle ?? 'Untitled' }] : [],
+  })}\n`);
+}
+
+async function runRewriteStdio(input: OpenZreadRewriteInput): Promise<void> {
+  if (!input.instruction?.trim() || typeof input.pageContent !== 'string') {
+    throw new Error('Rewrite instruction and page content are required.');
+  }
+  const config = await loadConfig();
+  if (!config.llm.provider || !config.llm.model || !config.llm.api_key) {
+    throw new Error('OpenZread model configuration is incomplete; configure the Hub shared model first.');
+  }
+  const scope = input.sectionHeading?.trim()
+    ? `Only rewrite the Markdown section whose heading is exactly "${input.sectionHeading.trim()}" and its children. Preserve every line outside that section exactly.`
+    : 'Rewrite the complete page while preserving valid Markdown and the page topic.';
+  const provider = createProvider(config.llm.provider, {
+    apiKey: config.llm.api_key,
+    baseURL: config.llm.base_url ?? undefined,
+  });
+  const response = await provider.createMessage({
+    model: config.llm.model,
+    maxTokens: 4000,
+    system: [
+      'You are a Wiki Markdown editor.',
+      scope,
+      'Return only the complete resulting Markdown document. Do not wrap it in a code fence. Do not explain your changes.',
+      input.pageTitle || input.pageSlug
+        ? `Page: ${input.pageTitle ?? 'Untitled'}${input.pageSlug ? ` (${input.pageSlug})` : ''}`
+        : undefined,
+    ].filter((value): value is string => Boolean(value)).join('\n\n'),
+    messages: [{
+      role: 'user',
+      content: `Instruction:\n${input.instruction.trim()}\n\nCurrent Markdown:\n${input.pageContent}`,
+    }],
+  });
+  const after = response.content
+    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n')
+    .trim();
+  if (!after) {
+    throw new Error('The model returned no Markdown draft.');
+  }
+  process.stdout.write(`${JSON.stringify({ kind: 'rewrite', status: 'succeeded', after })}\n`);
+}
+
+async function runDraftStdio(input: OpenZreadDraftInput): Promise<void> {
+  if (!input.topic?.trim()) {
+    throw new Error('A page topic is required.');
+  }
+  const config = await loadConfig();
+  if (!config.llm.provider || !config.llm.model || !config.llm.api_key) {
+    throw new Error('OpenZread model configuration is incomplete; configure the Hub shared model first.');
+  }
+  const provider = createProvider(config.llm.provider, {
+    apiKey: config.llm.api_key,
+    baseURL: config.llm.base_url ?? undefined,
+  });
+  const response = await provider.createMessage({
+    model: config.llm.model,
+    maxTokens: 4000,
+    system: [
+      'You create a draft Wiki page for a local code knowledge base.',
+      'Return only valid JSON with keys slug, title, section, content, associatedFiles.',
+      'slug and section must be safe single path components; associatedFiles must be an array of project-relative paths.',
+      'The draft is not applied yet and must not claim that files were changed.',
+    ].join('\n'),
+    messages: [{
+      role: 'user',
+      content: JSON.stringify({
+        topic: input.topic.trim(),
+        requestedSection: input.section?.trim() || undefined,
+        existingSections: input.existingSections ?? [],
+      }),
+    }],
+  });
+  const text = response.content
+    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n')
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '');
+  const draft = JSON.parse(text) as Record<string, unknown>;
+  if (typeof draft.slug !== 'string' || typeof draft.title !== 'string'
+    || typeof draft.section !== 'string' || typeof draft.content !== 'string'
+    || !Array.isArray(draft.associatedFiles)) {
+    throw new Error('The model returned an invalid Wiki page draft.');
+  }
+  process.stdout.write(`${JSON.stringify({
+    kind: 'draft',
+    status: 'succeeded',
+    slug: draft.slug,
+    title: draft.title,
+    section: draft.section,
+    content: draft.content,
+    associatedFiles: draft.associatedFiles.filter((path): path is string => typeof path === 'string'),
+  })}\n`);
+}
+
 export async function runOpenZreadStdio(options: OpenZreadStdioRunOptions): Promise<void> {
   const projectRoot = resolve(options.projectRoot);
   const emit = options.emit;
@@ -200,6 +364,22 @@ export async function runOpenZreadStdioCommand(
   projectRoot: string,
   operation: OpenZreadStdioOperation,
 ): Promise<void> {
+  if (operation === 'ask' || operation === 'rewrite' || operation === 'draft') {
+    const input = await new Promise<string>((resolveInput, reject) => {
+      const chunks: Buffer[] = [];
+      process.stdin.on('data', (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
+      process.stdin.on('end', () => resolveInput(Buffer.concat(chunks).toString('utf8')));
+      process.stdin.on('error', reject);
+    });
+    if (operation === 'ask') {
+      await runAskStdio(JSON.parse(input) as OpenZreadAskInput);
+    } else if (operation === 'rewrite') {
+      await runRewriteStdio(JSON.parse(input) as OpenZreadRewriteInput);
+    } else {
+      await runDraftStdio(JSON.parse(input) as OpenZreadDraftInput);
+    }
+    return;
+  }
   await runOpenZreadStdio({
     projectRoot,
     operation,

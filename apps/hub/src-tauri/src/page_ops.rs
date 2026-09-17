@@ -1,9 +1,11 @@
 use crate::contracts::{HubCommandError, HubWikiPageMutationResponse};
+use crate::history::record_open_zread_structure_snapshot;
 use crate::projects::{project_root, safe_page_path, safe_relative_path};
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use tauri::AppHandle;
+use uuid::Uuid;
 
 struct CatalogLocation {
     provider: &'static str,
@@ -275,6 +277,14 @@ pub(crate) fn create_page(
         rollback_catalog(&location.catalog_path, &original_catalog);
         return Err(write_error);
     }
+    if location.provider == "open_zread" {
+        let _ = record_open_zread_structure_snapshot(
+            &root,
+            &Uuid::new_v4().to_string(),
+            &original_catalog,
+            &[(relative_path.clone(), None)],
+        );
+    }
     Ok(response(
         project_id,
         &location,
@@ -324,6 +334,17 @@ pub(crate) fn delete_page(
             true,
         ));
     }
+    if location.provider == "open_zread" {
+        let _ = record_open_zread_structure_snapshot(
+            &root,
+            &Uuid::new_v4().to_string(),
+            &original_catalog,
+            &[(
+                relative_path.clone(),
+                Some(String::from_utf8_lossy(&original_page).to_string()),
+            )],
+        );
+    }
     Ok(response(
         project_id,
         &location,
@@ -344,6 +365,8 @@ pub(crate) fn update_metadata(
     section: Option<&str>,
     group: Option<&str>,
     associated_files: Option<&[String]>,
+    order: Option<u32>,
+    clear_group: bool,
 ) -> Result<HubWikiPageMutationResponse, HubCommandError> {
     let root = project_root(app, project_id)?;
     let location = location(&root, provider)?;
@@ -397,7 +420,7 @@ pub(crate) fn update_metadata(
             ));
         }
     }
-    let (old_target, _) = page_path(&location, &page_snapshot)?;
+    let (old_target, old_relative_path) = page_path(&location, &page_snapshot)?;
     let next_relative = if location.flat_pages {
         current_file.clone()
     } else {
@@ -418,6 +441,17 @@ pub(crate) fn update_metadata(
             false,
         ));
     }
+    let old_content = if moved {
+        Some(fs::read_to_string(&old_target).map_err(|read_error| {
+            error(
+                "wiki_read_failed",
+                format!("Unable to read the Wiki page: {read_error}"),
+                true,
+            )
+        })?)
+    } else {
+        None
+    };
     let page = pages
         .get_mut(index)
         .and_then(Value::as_object_mut)
@@ -436,6 +470,9 @@ pub(crate) fn update_metadata(
     }
     if let Some(group) = group {
         page.insert("group".to_string(), Value::String(group.to_string()));
+    }
+    if clear_group {
+        page.remove("group");
     }
     if let Some(files) = associated_files {
         let key = if page.contains_key("sourceRefs") {
@@ -456,12 +493,28 @@ pub(crate) fn update_metadata(
         fs::rename(&old_target, &next_target)
             .map_err(|write_error| error("internal_error", write_error.to_string(), true))?;
     }
+    if let Some(order) = order {
+        let page_value = pages.remove(index);
+        let target_index = (order as usize).min(pages.len());
+        pages.insert(target_index, page_value);
+    }
     if let Err(write_error) = write_catalog(&location.catalog_path, &catalog) {
         if moved {
             let _ = fs::rename(&next_target, &old_target);
         }
         rollback_catalog(&location.catalog_path, &original_catalog);
         return Err(write_error);
+    }
+    if location.provider == "open_zread" && moved {
+        let _ = record_open_zread_structure_snapshot(
+            &root,
+            &Uuid::new_v4().to_string(),
+            &original_catalog,
+            &[
+                (old_relative_path, old_content),
+                (next_relative.clone(), None),
+            ],
+        );
     }
     Ok(response(
         project_id,

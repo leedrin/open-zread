@@ -6,6 +6,8 @@ import type {
   HubWikiChangeSet,
   HubWikiHistoryEntry,
   HubWikiDocument,
+  HubWikiAnswerResponse,
+  HubWikiPageDraftResponse,
   HubWikiPage,
   HubWikiPageMutationResponse,
   HubWikiProvider,
@@ -48,6 +50,26 @@ interface OpenZreadReaderProps {
     group?: string;
     associatedFiles?: string[];
   }) => Promise<HubWikiPageMutationResponse>;
+  askWiki: (
+    projectId: string,
+    provider: HubWikiProvider,
+    slug: string,
+    question: string,
+    selectedText?: string,
+  ) => Promise<HubWikiAnswerResponse>;
+  rewritePage: (
+    projectId: string,
+    provider: HubWikiProvider,
+    slug: string,
+    instruction: string,
+    sectionHeading?: string,
+  ) => Promise<HubWikiChangeSet>;
+  draftPage: (
+    projectId: string,
+    provider: HubWikiProvider,
+    topic: string,
+    section?: string,
+  ) => Promise<HubWikiPageDraftResponse>;
   onHistoryRestored: () => void;
   onClose: () => void;
 }
@@ -288,6 +310,9 @@ export function OpenZreadReader({
   createPage,
   deletePage,
   updatePageMetadata,
+  askWiki,
+  rewritePage,
+  draftPage,
   onHistoryRestored,
   onClose,
 }: OpenZreadReaderProps) {
@@ -319,12 +344,21 @@ export function OpenZreadReader({
   const [newPageSection, setNewPageSection] = useState('General');
   const [newPageContent, setNewPageContent] = useState('');
   const [newPageAssociatedFiles, setNewPageAssociatedFiles] = useState('');
+  const [newPageTopic, setNewPageTopic] = useState('');
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [metadataSlug, setMetadataSlug] = useState('');
   const [metadataTitle, setMetadataTitle] = useState('');
   const [metadataSection, setMetadataSection] = useState('');
   const [pageMutationBusy, setPageMutationBusy] = useState(false);
   const [pageMutationError, setPageMutationError] = useState<string | null>(null);
+  const [qaOpen, setQaOpen] = useState(false);
+  const [qaQuestion, setQaQuestion] = useState('');
+  const [qaAnswer, setQaAnswer] = useState<HubWikiAnswerResponse | null>(null);
+  const [qaBusy, setQaBusy] = useState(false);
+  const [qaError, setQaError] = useState<string | null>(null);
+  const [rewriteOpen, setRewriteOpen] = useState(false);
+  const [rewriteInstruction, setRewriteInstruction] = useState('');
+  const [rewriteSection, setRewriteSection] = useState('');
   const articleRef = useRef<HTMLElement | null>(null);
   const selectedPage = wiki.pages.find((page) => page.slug === selectedSlug) ?? wiki.pages[0];
   const sections = useMemo(() => {
@@ -357,6 +391,13 @@ export function OpenZreadReader({
     setNewPageOpen(false);
     setMetadataOpen(false);
     setPageMutationError(null);
+    setQaOpen(false);
+    setQaQuestion('');
+    setQaAnswer(null);
+    setQaError(null);
+    setRewriteOpen(false);
+    setRewriteInstruction('');
+    setRewriteSection('');
   }, [wiki.provider, wiki.currentPointer, wiki.versionId]);
 
   useEffect(() => {
@@ -486,6 +527,7 @@ export function OpenZreadReader({
     setNewPageSection(sections[0]?.[0] ?? 'General');
     setNewPageContent('');
     setNewPageAssociatedFiles('');
+    setNewPageTopic('');
     setPageMutationError(null);
     setNewPageOpen(true);
   };
@@ -505,6 +547,26 @@ export function OpenZreadReader({
       onHistoryRestored();
     } catch (error) {
       setPageMutationError(error instanceof Error ? error.message : 'Unable to create the Wiki page.');
+    } finally {
+      setPageMutationBusy(false);
+    }
+  };
+
+  const draftNewPageWithAi = async () => {
+    if (!newPageTopic.trim()) {
+      return;
+    }
+    setPageMutationBusy(true);
+    setPageMutationError(null);
+    try {
+      const draft = await draftPage(project.id, wiki.provider, newPageTopic, newPageSection);
+      setNewPageSlug(draft.slug);
+      setNewPageTitle(draft.title);
+      setNewPageSection(draft.section);
+      setNewPageContent(draft.content);
+      setNewPageAssociatedFiles(draft.associatedFiles.join(', '));
+    } catch (error) {
+      setPageMutationError(error instanceof Error ? error.message : 'Unable to create an AI page draft.');
     } finally {
       setPageMutationBusy(false);
     }
@@ -558,6 +620,61 @@ export function OpenZreadReader({
     }
   };
 
+  const askCurrentPage = async () => {
+    if (!selectedPage || !qaQuestion.trim()) {
+      return;
+    }
+    setQaBusy(true);
+    setQaError(null);
+    try {
+      setQaAnswer(await askWiki(
+        project.id,
+        wiki.provider,
+        selectedPage.slug,
+        qaQuestion,
+      ));
+    } catch (error) {
+      setQaError(error instanceof Error ? error.message : 'Unable to answer from the current Wiki page.');
+    } finally {
+      setQaBusy(false);
+    }
+  };
+
+  const startAiRewrite = () => {
+    if (!selectedPage || selectedPage.status !== 'readable') {
+      return;
+    }
+    setRewriteInstruction('');
+    setRewriteSection('');
+    setEditError(null);
+    setRewriteOpen(true);
+  };
+
+  const createAiRewrite = async () => {
+    if (!selectedPage || !rewriteInstruction.trim()) {
+      return;
+    }
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      const draft = await rewritePage(
+        project.id,
+        wiki.provider,
+        selectedPage.slug,
+        rewriteInstruction,
+        rewriteSection.trim() || undefined,
+      );
+      setChangeSet(draft);
+      setDraftContent(draft.after);
+      setRewriteOpen(false);
+      setEditing(true);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : 'Unable to create the AI rewrite draft.');
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
   const displayPage = selectedPage && editedContent[selectedPage.slug] !== undefined
     ? { ...selectedPage, content: editedContent[selectedPage.slug] }
     : selectedPage;
@@ -606,7 +723,38 @@ export function OpenZreadReader({
         <button type="button" className="secondary-button" data-testid="open-wiki-history" onClick={() => void openHistory()}>
           {historyOpen ? 'Hide history' : 'History & restore'}
         </button>
+        <button type="button" className="secondary-button" data-testid="open-wiki-qa" onClick={() => setQaOpen((current) => !current)}>
+          {qaOpen ? 'Hide Q&A' : 'Ask this Wiki'}
+        </button>
       </div>
+      {qaOpen && selectedPage && (
+        <section className="wiki-qa-panel" data-testid="wiki-qa-panel" aria-label="Wiki Q&A">
+          <div>
+            <p className="eyebrow">READ-ONLY CONTEXT</p>
+            <h3>Ask about {selectedPage.title}</h3>
+          </div>
+          <form onSubmit={(event) => { event.preventDefault(); void askCurrentPage(); }}>
+            <textarea
+              data-testid="wiki-qa-question"
+              value={qaQuestion}
+              onChange={(event) => setQaQuestion(event.target.value)}
+              placeholder="What does this page explain?"
+            />
+            <button type="submit" className="primary-button" data-testid="ask-wiki-question" disabled={qaBusy || !qaQuestion.trim()}>
+              {qaBusy ? 'Asking…' : 'Ask'}
+            </button>
+          </form>
+          {qaAnswer && (
+            <div className="wiki-qa-answer" data-testid="wiki-qa-answer">
+              <p>{qaAnswer.answer}</p>
+              {qaAnswer.references.length > 0 && (
+                <small>Reference: {qaAnswer.references.map((reference) => reference.title).join(', ')}</small>
+              )}
+            </div>
+          )}
+          {qaError && <p className="wiki-reader-page-error" role="alert">{qaError}</p>}
+        </section>
+      )}
       {newPageOpen && (
         <form
           className="wiki-structure-form"
@@ -621,6 +769,8 @@ export function OpenZreadReader({
             <button type="button" className="secondary-button" onClick={() => setNewPageOpen(false)}>Cancel</button>
           </div>
           <div className="wiki-structure-form-grid">
+            <label>AI topic<input data-testid="new-wiki-page-topic" value={newPageTopic} onChange={(event) => setNewPageTopic(event.target.value)} /></label>
+            <div className="wiki-structure-form-inline-action"><button type="button" className="secondary-button" data-testid="draft-new-wiki-page" disabled={pageMutationBusy || !newPageTopic.trim()} onClick={() => void draftNewPageWithAi()}>{pageMutationBusy ? 'Drafting…' : 'Draft with AI'}</button></div>
             <label>Slug<input data-testid="new-wiki-page-slug" value={newPageSlug} onChange={(event) => setNewPageSlug(event.target.value)} /></label>
             <label>Title<input data-testid="new-wiki-page-title" value={newPageTitle} onChange={(event) => setNewPageTitle(event.target.value)} /></label>
             <label>Section<input data-testid="new-wiki-page-section" value={newPageSection} onChange={(event) => setNewPageSection(event.target.value)} /></label>
@@ -717,6 +867,11 @@ export function OpenZreadReader({
                       Metadata
                     </button>
                   )}
+                  {selectedPage.status === 'readable' && !editing && (
+                    <button type="button" className="secondary-button" data-testid={`ai-rewrite-wiki-page-${selectedPage.slug}`} onClick={startAiRewrite}>
+                      AI rewrite
+                    </button>
+                  )}
                   {!editing && (
                     <button type="button" className="danger-button" data-testid={`delete-wiki-page-${selectedPage.slug}`} disabled={pageMutationBusy} onClick={() => void removeSelectedPage()}>
                       Delete
@@ -724,7 +879,23 @@ export function OpenZreadReader({
                   )}
                 </div>
               </div>
-              {metadataOpen ? (
+              {rewriteOpen ? (
+                <form
+                  className="wiki-structure-form wiki-metadata-form"
+                  data-testid="wiki-ai-rewrite-form"
+                  onSubmit={(event) => { event.preventDefault(); void createAiRewrite(); }}
+                >
+                  <label>Instruction<textarea data-testid="wiki-ai-rewrite-instruction" value={rewriteInstruction} onChange={(event) => setRewriteInstruction(event.target.value)} placeholder="Clarify the failure recovery behavior." /></label>
+                  <label>Optional section heading<input data-testid="wiki-ai-rewrite-section" value={rewriteSection} onChange={(event) => setRewriteSection(event.target.value)} placeholder="Leave blank to rewrite the full page" /></label>
+                  <div className="wiki-editor-actions">
+                    <button type="button" className="secondary-button" disabled={editBusy} onClick={() => setRewriteOpen(false)}>Cancel</button>
+                    <button type="submit" className="primary-button" data-testid="create-ai-rewrite" disabled={editBusy || !rewriteInstruction.trim()}>
+                      {editBusy ? 'Generating…' : 'Preview AI ChangeSet'}
+                    </button>
+                  </div>
+                  {editError && <p className="wiki-reader-page-error" role="alert">{editError}</p>}
+                </form>
+              ) : metadataOpen ? (
                 <form
                   className="wiki-structure-form wiki-metadata-form"
                   data-testid="wiki-metadata-form"

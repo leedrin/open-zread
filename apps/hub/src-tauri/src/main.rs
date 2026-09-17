@@ -1,6 +1,7 @@
 mod commands;
 mod contracts;
 mod history;
+mod merge;
 mod mutations;
 mod page_ops;
 mod projects;
@@ -27,6 +28,10 @@ fn main() {
             commands::create_hub_wiki_page,
             commands::delete_hub_wiki_page,
             commands::update_hub_wiki_page_metadata,
+            commands::merge_hub_wiki_text,
+            commands::ask_hub_wiki,
+            commands::rewrite_hub_wiki_page,
+            commands::draft_hub_wiki_page,
             commands::cancel_hub_task,
             commands::list_hub_projects,
             commands::register_hub_project,

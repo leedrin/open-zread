@@ -118,6 +118,65 @@ pub(crate) fn record_open_zread_page(
     })
 }
 
+pub(crate) fn record_open_zread_structure_snapshot(
+    root: &Path,
+    change_set_id: &str,
+    catalog: &[u8],
+    entries: &[(String, Option<String>)],
+) -> Result<(), HubCommandError> {
+    if !safe_history_id(change_set_id) {
+        return Err(error(
+            "invalid_request",
+            "The Wiki history id is invalid.",
+            false,
+        ));
+    }
+    let catalog_value = serde_json::from_slice::<Value>(catalog)
+        .map_err(|_| error("wiki_invalid", "The Wiki catalog is not valid JSON.", false))?;
+    let history_root = root.join(".open-zread").join("wiki").join(".history");
+    let entry_root = history_root.join(change_set_id);
+    fs::create_dir_all(&entry_root).map_err(|write_error| {
+        error(
+            "internal_error",
+            format!("Unable to create Wiki history: {write_error}"),
+            true,
+        )
+    })?;
+    let serialized_entries = entries
+        .iter()
+        .map(|(relative_path, content)| {
+            if !safe_relative_path(relative_path) {
+                return Err(error(
+                    "invalid_request",
+                    "The Wiki history path is invalid.",
+                    false,
+                ));
+            }
+            Ok(json!({ "relativePath": relative_path, "content": content }))
+        })
+        .collect::<Result<Vec<_>, HubCommandError>>()?;
+    let manifest = json!({
+        "id": change_set_id,
+        "createdAt": now_millis(),
+        "pages": catalog_value.get("pages").cloned().unwrap_or_else(|| json!([])),
+        "catalog": String::from_utf8_lossy(catalog),
+        "entries": serialized_entries,
+    });
+    fs::write(
+        entry_root.join("manifest.json"),
+        serde_json::to_vec_pretty(&manifest).map_err(|serialization_error| {
+            error("internal_error", serialization_error.to_string(), true)
+        })?,
+    )
+    .map_err(|write_error| {
+        error(
+            "internal_error",
+            format!("Unable to save Wiki history: {write_error}"),
+            true,
+        )
+    })
+}
+
 fn zread_versions(root: &Path) -> Result<(PathBuf, String), HubCommandError> {
     let wiki_root = root.join(".zread").join("wiki");
     let pointer = fs::read_to_string(wiki_root.join("current"))
@@ -255,6 +314,56 @@ fn restore_open_history(root: &Path, id: &str) -> Result<(), HubCommandError> {
             )
         })?)
         .map_err(|_| error("wiki_invalid", "The history entry is invalid.", false))?;
+    if let Some(catalog) = manifest.get("catalog").and_then(Value::as_str) {
+        let wiki_root = root.join(".open-zread").join("wiki");
+        if let Some(entries) = manifest.get("entries").and_then(Value::as_array) {
+            for entry in entries {
+                let relative_path = entry
+                    .get("relativePath")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        error("wiki_invalid", "The history page path is invalid.", false)
+                    })?;
+                let target = safe_page_path(&wiki_root, &[relative_path]).ok_or_else(|| {
+                    error(
+                        "wiki_invalid",
+                        "The history page path escapes the Wiki root.",
+                        false,
+                    )
+                })?;
+                match entry.get("content") {
+                    Some(Value::String(content)) => {
+                        if let Some(parent) = target.parent() {
+                            fs::create_dir_all(parent).map_err(|write_error| {
+                                error("internal_error", write_error.to_string(), true)
+                            })?;
+                        }
+                        fs::write(target, content).map_err(|write_error| {
+                            error("internal_error", write_error.to_string(), true)
+                        })?;
+                    }
+                    Some(Value::Null) | None => {
+                        let _ = fs::remove_file(target);
+                    }
+                    _ => {
+                        return Err(error(
+                            "wiki_invalid",
+                            "The history page content is invalid.",
+                            false,
+                        ))
+                    }
+                }
+            }
+        }
+        fs::write(wiki_root.join("wiki.json"), catalog).map_err(|write_error| {
+            error(
+                "internal_error",
+                format!("Unable to restore the Wiki catalog: {write_error}"),
+                true,
+            )
+        })?;
+        return Ok(());
+    }
     for page in manifest
         .get("pages")
         .and_then(Value::as_array)
@@ -288,6 +397,52 @@ fn restore_open_history(root: &Path, id: &str) -> Result<(), HubCommandError> {
         })?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn structure_snapshot_restores_catalog_and_created_or_deleted_files() {
+        let root =
+            std::env::temp_dir().join(format!("open-zread-history-{}", uuid::Uuid::new_v4()));
+        let wiki_root = root.join(".open-zread").join("wiki");
+        fs::create_dir_all(&wiki_root).expect("wiki root should be created");
+        let original_catalog =
+            br#"{"pages":[{"slug":"overview","file":"overview.md","section":"Core"}]}"#;
+        fs::write(wiki_root.join("wiki.json"), original_catalog)
+            .expect("catalog should be written");
+        fs::write(wiki_root.join("overview.md"), "# Before\n").expect("page should be written");
+        record_open_zread_structure_snapshot(
+            &root,
+            "change-1",
+            original_catalog,
+            &[
+                ("overview.md".to_string(), Some("# Before\n".to_string())),
+                ("new.md".to_string(), None),
+            ],
+        )
+        .expect("snapshot should be recorded");
+        fs::write(
+            wiki_root.join("wiki.json"),
+            br#"{"pages":[{"slug":"new","file":"new.md","section":"Core"}]}"#,
+        )
+        .expect("changed catalog should be written");
+        fs::write(wiki_root.join("new.md"), "# New\n").expect("new page should be written");
+
+        restore_open_history(&root, "change-1").expect("snapshot should restore");
+        assert_eq!(
+            fs::read(wiki_root.join("wiki.json")).unwrap(),
+            original_catalog
+        );
+        assert_eq!(
+            fs::read_to_string(wiki_root.join("overview.md")).unwrap(),
+            "# Before\n"
+        );
+        assert!(!wiki_root.join("new.md").exists());
+        fs::remove_dir_all(root).expect("temporary history should be removed");
+    }
 }
 
 fn restore_zread_history(root: &Path, id: &str) -> Result<(), HubCommandError> {

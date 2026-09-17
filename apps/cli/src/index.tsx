@@ -29,7 +29,7 @@ program
   .action(async (options: { stdio?: boolean; operation?: string }) => {
     if (options.stdio) {
       const operation = options.operation;
-      if (operation !== 'generate' && operation !== 'sync') {
+      if (operation !== 'generate' && operation !== 'sync' && operation !== 'ask' && operation !== 'rewrite' && operation !== 'draft') {
         throw new Error(`Unsupported stdio wiki operation: ${operation}`);
       }
       await runOpenZreadStdioCommand(process.cwd(), operation as OpenZreadStdioOperation);

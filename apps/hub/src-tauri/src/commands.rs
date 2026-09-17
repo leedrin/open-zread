@@ -2,8 +2,9 @@ use crate::contracts::{
     CancelTaskResponse, HubCommandError, HubHealth, HubOpenZreadWiki, HubProject,
     HubProviderCapabilities, HubProviderContentHealth, HubProviderGeneratorHealth,
     HubProviderHealth, HubRunnerInfo, HubServiceHealth, HubSourceFile, HubTask, HubTaskEvent,
-    HubWikiAsset, HubWikiChangeSet, HubWikiHistoryEntry, HubWikiPageMutationResponse,
-    HubWikiSearchResponse, RegisterProjectResponse, TASK_EVENT,
+    HubWikiAnswerReference, HubWikiAnswerResponse, HubWikiAsset, HubWikiChangeSet,
+    HubWikiHistoryEntry, HubWikiMergeResponse, HubWikiPageDraftResponse,
+    HubWikiPageMutationResponse, HubWikiSearchResponse, RegisterProjectResponse, TASK_EVENT,
 };
 use crate::mutations::ChangeSetCoordinator;
 use crate::projects::{
@@ -17,8 +18,9 @@ use crate::reader::{
 use crate::tasks::TaskCoordinator;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -27,6 +29,18 @@ const RUNNER_EXECUTABLE: &str = "open-zread.exe";
 const RUNNER_MANIFEST: &str = "open-zread.manifest.json";
 const PROVIDER_SETTINGS_FILE: &str = "provider-settings.json";
 const ZREAD_NOT_DETECTED: &str = "Not detected";
+
+fn command_error(
+    code: &'static str,
+    message: impl Into<String>,
+    retryable: bool,
+) -> HubCommandError {
+    HubCommandError {
+        code,
+        message: message.into(),
+        retryable,
+    }
+}
 
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -714,6 +728,8 @@ pub fn update_hub_wiki_page_metadata(
     section: Option<String>,
     group: Option<String>,
     associated_files: Option<Vec<String>>,
+    order: Option<u32>,
+    clear_group: Option<bool>,
 ) -> Result<HubWikiPageMutationResponse, HubCommandError> {
     crate::page_ops::update_metadata(
         &app,
@@ -725,7 +741,485 @@ pub fn update_hub_wiki_page_metadata(
         section.as_deref(),
         group.as_deref(),
         associated_files.as_deref(),
+        order,
+        clear_group.unwrap_or(false),
     )
+}
+
+#[tauri::command]
+pub fn merge_hub_wiki_text(
+    base: String,
+    local: String,
+    incoming: String,
+) -> Result<HubWikiMergeResponse, HubCommandError> {
+    crate::merge::merge_text(&base, &local, &incoming)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunnerAnswerReference {
+    slug: String,
+    title: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunnerAnswer {
+    kind: String,
+    status: String,
+    answer: String,
+    references: Vec<RunnerAnswerReference>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunnerRewrite {
+    kind: String,
+    status: String,
+    after: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunnerDraft {
+    kind: String,
+    status: String,
+    slug: String,
+    title: String,
+    section: String,
+    content: String,
+    associated_files: Vec<String>,
+}
+
+fn markdown_heading(line: &str) -> Option<(usize, String)> {
+    let trimmed = line.trim();
+    let level = trimmed
+        .chars()
+        .take_while(|character| *character == '#')
+        .count();
+    if !(1..=6).contains(&level) || trimmed.chars().nth(level) != Some(' ') {
+        return None;
+    }
+    let text = trimmed[level..].trim().trim_end_matches('#').trim();
+    (!text.is_empty()).then(|| (level, text.to_string()))
+}
+
+fn rewrite_scope_is_preserved(before: &str, after: &str, requested_heading: &str) -> bool {
+    let requested = requested_heading
+        .trim()
+        .trim_start_matches('#')
+        .trim()
+        .trim_end_matches('#')
+        .trim();
+    if requested.is_empty() {
+        return false;
+    }
+    let locate = |content: &str| {
+        let mut fenced = false;
+        let lines = content.split_inclusive('\n').collect::<Vec<_>>();
+        let start = lines.iter().enumerate().find_map(|(index, line)| {
+            if line.trim_start().starts_with("```") {
+                fenced = !fenced;
+                return None;
+            }
+            if fenced {
+                return None;
+            }
+            markdown_heading(line)
+                .filter(|(_, text)| text == requested)
+                .map(|(level, _)| (index, level))
+        })?;
+        let end = lines
+            .iter()
+            .enumerate()
+            .skip(start.0 + 1)
+            .find_map(|(index, line)| {
+                markdown_heading(line)
+                    .filter(|(level, _)| *level <= start.1)
+                    .map(|_| index)
+            })
+            .unwrap_or(lines.len());
+        Some((
+            lines[..start.0].concat(),
+            lines[start.0..end].concat(),
+            lines[end..].concat(),
+        ))
+    };
+    let Some((before_prefix, _, before_suffix)) = locate(before) else {
+        return false;
+    };
+    let Some((after_prefix, _, after_suffix)) = locate(after) else {
+        return false;
+    };
+    before_prefix == after_prefix && before_suffix == after_suffix
+}
+
+#[tauri::command]
+pub fn ask_hub_wiki(
+    app: AppHandle,
+    project_id: String,
+    provider: String,
+    slug: String,
+    question: String,
+    selected_text: Option<String>,
+) -> Result<HubWikiAnswerResponse, HubCommandError> {
+    let project_id = project_id.trim();
+    let slug = slug.trim();
+    let question = question.trim();
+    if project_id.is_empty() || slug.is_empty() || question.is_empty() {
+        return Err(command_error(
+            "invalid_request",
+            "Project id, page slug, and question are required.",
+            false,
+        ));
+    }
+    let page = match provider.as_str() {
+        "open_zread" => read_open_zread_wiki(&app, project_id)?,
+        "zread" => read_zread_wiki(&app, project_id)?,
+        _ => {
+            return Err(command_error(
+                "invalid_request",
+                "Wiki provider must be open_zread or zread.",
+                false,
+            ))
+        }
+    };
+    let page = page
+        .pages
+        .iter()
+        .find(|page| page.slug == slug)
+        .ok_or_else(|| command_error("source_not_found", "The Wiki page was not found.", false))?;
+    let content = page.content.clone().ok_or_else(|| {
+        command_error(
+            "wiki_read_failed",
+            "The selected Wiki page has no readable content.",
+            true,
+        )
+    })?;
+    let project = list_projects(&app)?
+        .into_iter()
+        .find(|project| project.id == project_id)
+        .ok_or_else(|| {
+            command_error(
+                "project_not_found",
+                "The selected Project is not registered.",
+                false,
+            )
+        })?;
+    let executable = embedded_runner_executable(&app)?;
+    let input = serde_json::json!({
+        "question": question,
+        "pageTitle": page.title,
+        "pageSlug": page.slug,
+        "pageContent": content,
+        "selectedText": selected_text.filter(|text| !text.trim().is_empty()),
+    });
+    let mut process = Command::new(executable)
+        .arg("wiki")
+        .arg("--stdio")
+        .arg("--operation")
+        .arg("ask")
+        .current_dir(&project.path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|spawn_error| {
+            command_error(
+                "service_unavailable",
+                format!("Unable to start the Hub Q&A runner: {spawn_error}"),
+                true,
+            )
+        })?;
+    if let Some(mut stdin) = process.stdin.take() {
+        serde_json::to_writer(&mut stdin, &input).map_err(|write_error| {
+            command_error("internal_error", write_error.to_string(), true)
+        })?;
+        stdin.flush().map_err(|write_error| {
+            command_error("internal_error", write_error.to_string(), true)
+        })?;
+    }
+    let output = process
+        .wait_with_output()
+        .map_err(|wait_error| command_error("service_unavailable", wait_error.to_string(), true))?;
+    if !output.status.success() {
+        return Err(command_error(
+            "service_unavailable",
+            "The configured Hub model could not answer the Wiki question.",
+            true,
+        ));
+    }
+    let answer = serde_json::from_slice::<RunnerAnswer>(&output.stdout).map_err(|_| {
+        command_error(
+            "internal_error",
+            "The Hub Q&A runner returned an invalid response.",
+            true,
+        )
+    })?;
+    if answer.kind != "qa" || answer.status != "succeeded" || answer.answer.trim().is_empty() {
+        return Err(command_error(
+            "service_unavailable",
+            "The Hub Q&A runner did not return an answer.",
+            true,
+        ));
+    }
+    Ok(HubWikiAnswerResponse {
+        project_id: project_id.to_string(),
+        provider: if provider == "zread" {
+            "zread"
+        } else {
+            "open_zread"
+        },
+        slug: slug.to_string(),
+        answer: answer.answer,
+        references: answer
+            .references
+            .into_iter()
+            .map(|reference| HubWikiAnswerReference {
+                slug: reference.slug,
+                title: reference.title,
+            })
+            .collect(),
+    })
+}
+
+#[tauri::command]
+pub fn rewrite_hub_wiki_page(
+    app: AppHandle,
+    coordinator: State<'_, ChangeSetCoordinator>,
+    project_id: String,
+    provider: String,
+    slug: String,
+    instruction: String,
+    section_heading: Option<String>,
+) -> Result<HubWikiChangeSet, HubCommandError> {
+    let project_id = project_id.trim();
+    let slug = slug.trim();
+    let instruction = instruction.trim();
+    if project_id.is_empty() || slug.is_empty() || instruction.is_empty() {
+        return Err(command_error(
+            "invalid_request",
+            "Project id, page slug, and rewrite instruction are required.",
+            false,
+        ));
+    }
+    let page = match provider.as_str() {
+        "open_zread" => read_open_zread_wiki(&app, project_id)?,
+        "zread" => read_zread_wiki(&app, project_id)?,
+        _ => {
+            return Err(command_error(
+                "invalid_request",
+                "Wiki provider must be open_zread or zread.",
+                false,
+            ))
+        }
+    };
+    let page = page
+        .pages
+        .iter()
+        .find(|page| page.slug == slug)
+        .ok_or_else(|| command_error("source_not_found", "The Wiki page was not found.", false))?;
+    let before = page.content.clone().ok_or_else(|| {
+        command_error(
+            "wiki_read_failed",
+            "The selected Wiki page has no readable content.",
+            true,
+        )
+    })?;
+    let project = list_projects(&app)?
+        .into_iter()
+        .find(|project| project.id == project_id)
+        .ok_or_else(|| {
+            command_error(
+                "project_not_found",
+                "The selected Project is not registered.",
+                false,
+            )
+        })?;
+    let executable = embedded_runner_executable(&app)?;
+    let input = serde_json::json!({
+        "instruction": instruction,
+        "pageTitle": page.title,
+        "pageSlug": page.slug,
+        "pageContent": before,
+        "sectionHeading": section_heading,
+    });
+    let mut process = Command::new(executable)
+        .arg("wiki")
+        .arg("--stdio")
+        .arg("--operation")
+        .arg("rewrite")
+        .current_dir(&project.path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|spawn_error| {
+            command_error("service_unavailable", spawn_error.to_string(), true)
+        })?;
+    if let Some(mut stdin) = process.stdin.take() {
+        serde_json::to_writer(&mut stdin, &input).map_err(|write_error| {
+            command_error("internal_error", write_error.to_string(), true)
+        })?;
+        stdin.flush().map_err(|write_error| {
+            command_error("internal_error", write_error.to_string(), true)
+        })?;
+    }
+    let output = process
+        .wait_with_output()
+        .map_err(|wait_error| command_error("service_unavailable", wait_error.to_string(), true))?;
+    if !output.status.success() {
+        return Err(command_error(
+            "service_unavailable",
+            "The configured Hub model could not create a Wiki rewrite draft.",
+            true,
+        ));
+    }
+    let rewrite = serde_json::from_slice::<RunnerRewrite>(&output.stdout).map_err(|_| {
+        command_error(
+            "internal_error",
+            "The rewrite runner returned an invalid response.",
+            true,
+        )
+    })?;
+    if rewrite.kind != "rewrite" || rewrite.status != "succeeded" || rewrite.after.trim().is_empty()
+    {
+        return Err(command_error(
+            "service_unavailable",
+            "The rewrite runner did not return a Markdown draft.",
+            true,
+        ));
+    }
+    if let Some(heading) = section_heading.as_deref() {
+        if !rewrite_scope_is_preserved(&before, &rewrite.after, heading) {
+            return Err(command_error(
+                "conflict",
+                "The rewrite draft changed content outside the selected Markdown section.",
+                false,
+            ));
+        }
+    }
+    crate::mutations::preview_change(
+        &app,
+        &coordinator,
+        project_id,
+        &provider,
+        slug,
+        &rewrite.after,
+    )
+}
+
+#[tauri::command]
+pub fn draft_hub_wiki_page(
+    app: AppHandle,
+    project_id: String,
+    provider: String,
+    topic: String,
+    section: Option<String>,
+) -> Result<HubWikiPageDraftResponse, HubCommandError> {
+    let project_id = project_id.trim();
+    let topic = topic.trim();
+    if project_id.is_empty() || topic.is_empty() {
+        return Err(command_error(
+            "invalid_request",
+            "Project id and page topic are required.",
+            false,
+        ));
+    }
+    if provider != "open_zread" && provider != "zread" {
+        return Err(command_error(
+            "invalid_request",
+            "Wiki provider must be open_zread or zread.",
+            false,
+        ));
+    }
+    let project = list_projects(&app)?
+        .into_iter()
+        .find(|project| project.id == project_id)
+        .ok_or_else(|| {
+            command_error(
+                "project_not_found",
+                "The selected Project is not registered.",
+                false,
+            )
+        })?;
+    let existing_sections = match provider.as_str() {
+        "open_zread" => read_open_zread_wiki(&app, project_id)?.pages,
+        "zread" => read_zread_wiki(&app, project_id)?.pages,
+        _ => unreachable!(),
+    }
+    .into_iter()
+    .map(|page| page.section)
+    .collect::<std::collections::BTreeSet<_>>();
+    let executable = embedded_runner_executable(&app)?;
+    let input = serde_json::json!({
+        "topic": topic,
+        "section": section.filter(|value| !value.trim().is_empty()),
+        "existingSections": existing_sections,
+    });
+    let mut process = Command::new(executable)
+        .arg("wiki")
+        .arg("--stdio")
+        .arg("--operation")
+        .arg("draft")
+        .current_dir(&project.path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|spawn_error| {
+            command_error("service_unavailable", spawn_error.to_string(), true)
+        })?;
+    if let Some(mut stdin) = process.stdin.take() {
+        serde_json::to_writer(&mut stdin, &input).map_err(|write_error| {
+            command_error("internal_error", write_error.to_string(), true)
+        })?;
+        stdin.flush().map_err(|write_error| {
+            command_error("internal_error", write_error.to_string(), true)
+        })?;
+    }
+    let output = process
+        .wait_with_output()
+        .map_err(|wait_error| command_error("service_unavailable", wait_error.to_string(), true))?;
+    if !output.status.success() {
+        return Err(command_error(
+            "service_unavailable",
+            "The configured Hub model could not create a Wiki page draft.",
+            true,
+        ));
+    }
+    let draft = serde_json::from_slice::<RunnerDraft>(&output.stdout).map_err(|_| {
+        command_error(
+            "internal_error",
+            "The draft runner returned an invalid response.",
+            true,
+        )
+    })?;
+    if draft.kind != "draft"
+        || draft.status != "succeeded"
+        || draft.slug.trim().is_empty()
+        || draft.title.trim().is_empty()
+        || draft.section.trim().is_empty()
+        || draft.content.trim().is_empty()
+    {
+        return Err(command_error(
+            "service_unavailable",
+            "The draft runner did not return a complete Wiki page draft.",
+            true,
+        ));
+    }
+    Ok(HubWikiPageDraftResponse {
+        provider: if provider == "zread" {
+            "zread"
+        } else {
+            "open_zread"
+        },
+        slug: draft.slug,
+        title: draft.title,
+        section: draft.section,
+        content: draft.content,
+        associated_files: draft.associated_files,
+    })
 }
 
 #[tauri::command]
@@ -946,6 +1440,26 @@ mod tests {
         assert!(capabilities.structured_progress);
         assert!(!capabilities.sync);
         assert!(!capabilities.incremental_wiki_update);
+    }
+
+    #[test]
+    fn section_rewrite_scope_ignores_code_fence_headings_and_rejects_outer_changes() {
+        let before = "# Intro\n\n## Target\nold\n\n```md\n# Not a heading\n```\n\n## Other\nkeep\n";
+        let inside_changed =
+            "# Intro\n\n## Target\nnew\n\n```md\n# Not a heading\n```\n\n## Other\nkeep\n";
+        let outside_changed =
+            "# Changed\n\n## Target\nnew\n\n```md\n# Not a heading\n```\n\n## Other\nkeep\n";
+        assert!(rewrite_scope_is_preserved(before, inside_changed, "Target"));
+        assert!(!rewrite_scope_is_preserved(
+            before,
+            outside_changed,
+            "Target"
+        ));
+        assert!(!rewrite_scope_is_preserved(
+            before,
+            inside_changed,
+            "Not a heading"
+        ));
     }
 
     #[test]

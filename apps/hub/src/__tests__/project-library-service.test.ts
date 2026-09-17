@@ -4,6 +4,9 @@ import type {
   HubTask,
   HubWikiChangeSet,
   HubWikiHistoryEntry,
+  HubWikiAnswerResponse,
+  HubWikiMergeResponse,
+  HubWikiPageDraftResponse,
   HubWikiPageMutationResponse,
   HubWikiSearchResponse,
 } from '@open-zread/hub-contract';
@@ -86,6 +89,29 @@ const pageMutation: HubWikiPageMutationResponse = {
   slug: 'provider-collaboration',
   action: 'created',
   relativePath: 'Architecture/provider-collaboration.md',
+};
+
+const mergeResponse: HubWikiMergeResponse = {
+  status: 'clean',
+  content: '# Merged',
+  conflicts: [],
+};
+
+const answerResponse: HubWikiAnswerResponse = {
+  projectId: project.id,
+  provider: 'open_zread',
+  slug: 'overview',
+  answer: 'The page explains the architecture.',
+  references: [{ slug: 'overview', title: 'Overview' }],
+};
+
+const draftResponse: HubWikiPageDraftResponse = {
+  provider: 'open_zread',
+  slug: 'provider-collaboration',
+  title: 'Provider Collaboration',
+  section: 'Architecture',
+  content: '# Collaboration',
+  associatedFiles: ['src/provider.ts'],
 };
 
 function createTransport(
@@ -177,6 +203,10 @@ describe('Project Library application-service interface', () => {
       create_hub_wiki_page: pageMutation,
       delete_hub_wiki_page: { ...pageMutation, action: 'deleted' },
       update_hub_wiki_page_metadata: { ...pageMutation, action: 'updated' },
+      merge_hub_wiki_text: mergeResponse,
+      ask_hub_wiki: answerResponse,
+      rewrite_hub_wiki_page: changeSet,
+      draft_hub_wiki_page: draftResponse,
     }, [], calls));
 
     await expect(service.startOpenZreadTask(project.id, 'generate')).resolves.toEqual(task);
@@ -200,6 +230,10 @@ describe('Project Library application-service interface', () => {
       title: 'Provider Collaboration v2',
       section: 'Architecture',
     })).resolves.toMatchObject({ action: 'updated' });
+    await expect(service.mergeWikiText('# Base', '# Local', '# Incoming')).resolves.toEqual(mergeResponse);
+    await expect(service.askWiki(project.id, 'open_zread', 'overview', 'What is this?')).resolves.toEqual(answerResponse);
+    await expect(service.rewriteWikiPage(project.id, 'open_zread', 'overview', 'Clarify it', 'Architecture')).resolves.toEqual(changeSet);
+    await expect(service.draftWikiPage(project.id, 'open_zread', 'Provider collaboration')).resolves.toEqual(draftResponse);
     expect(calls).toEqual([
       { command: 'start_hub_open_zread_task', args: { projectId: project.id, operation: 'generate' } },
       { command: 'start_hub_zread_task', args: { projectId: project.id } },
@@ -241,6 +275,28 @@ describe('Project Library application-service interface', () => {
           title: 'Provider Collaboration v2',
           section: 'Architecture',
         },
+      },
+      {
+        command: 'merge_hub_wiki_text',
+        args: { base: '# Base', local: '# Local', incoming: '# Incoming' },
+      },
+      {
+        command: 'ask_hub_wiki',
+        args: { projectId: project.id, provider: 'open_zread', slug: 'overview', question: 'What is this?' },
+      },
+      {
+        command: 'rewrite_hub_wiki_page',
+        args: {
+          projectId: project.id,
+          provider: 'open_zread',
+          slug: 'overview',
+          instruction: 'Clarify it',
+          sectionHeading: 'Architecture',
+        },
+      },
+      {
+        command: 'draft_hub_wiki_page',
+        args: { projectId: project.id, provider: 'open_zread', topic: 'Provider collaboration' },
       },
     ]);
   });
