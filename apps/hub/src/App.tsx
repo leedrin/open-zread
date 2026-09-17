@@ -16,6 +16,8 @@ type ProjectsState =
   | { status: 'ready'; projects: HubProject[] }
   | { status: 'error'; message: string };
 
+type ProjectAction = 'idle' | 'adding' | 'managing';
+
 export interface HubAppProps {
   service?: HubApplicationService;
 }
@@ -32,11 +34,38 @@ function errorMessage(error: unknown): string {
   return 'Unable to reach the Hub Application Service.';
 }
 
+function formatLastOpened(lastOpenedAt?: string): string {
+  if (!lastOpenedAt) {
+    return 'Never opened';
+  }
+  const timestamp = Number(lastOpenedAt);
+  if (!Number.isFinite(timestamp)) {
+    return lastOpenedAt;
+  }
+  return new Date(timestamp).toLocaleString();
+}
+
+function StarIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" focusable="false">
+      <path
+        d="m12 3.8 2.5 5.08 5.6.81-4.05 3.95.96 5.58L12 16.58l-5.01 2.64.96-5.58L3.9 9.69l5.6-.81L12 3.8Z"
+        fill={filled ? 'currentColor' : 'none'}
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function HubApp({ service = defaultService }: HubAppProps) {
   const [healthState, setHealthState] = useState<HealthState>({ status: 'loading' });
   const [projectsState, setProjectsState] = useState<ProjectsState>({ status: 'loading' });
-  const [projectAction, setProjectAction] = useState<'idle' | 'adding'>('idle');
+  const [projectAction, setProjectAction] = useState<ProjectAction>('idle');
   const [projectMessage, setProjectMessage] = useState<string | null>(null);
+  const [projectQuery, setProjectQuery] = useState('');
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [lastTaskEvent, setLastTaskEvent] = useState<HubTaskEvent | null>(null);
   const mountedRef = useRef(true);
 
@@ -104,6 +133,143 @@ export function HubApp({ service = defaultService }: HubAppProps) {
     }
   }, [service]);
 
+  const replaceProject = useCallback((updatedProject: HubProject) => {
+    setProjectsState((current) => {
+      if (current.status !== 'ready') {
+        return current;
+      }
+      return {
+        status: 'ready',
+        projects: current.projects.map((project) => (
+          project.id === updatedProject.id ? updatedProject : project
+        )),
+      };
+    });
+  }, []);
+
+  const toggleFavorite = useCallback(async (project: HubProject) => {
+    setProjectAction('managing');
+    setProjectMessage(null);
+    try {
+      const updatedProject = await service.setProjectFavorite(project.id, !project.favorite);
+      if (mountedRef.current) {
+        replaceProject(updatedProject);
+        setProjectMessage(updatedProject.favorite ? 'Project added to favorites.' : 'Project removed from favorites.');
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setProjectMessage(errorMessage(error));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setProjectAction('idle');
+      }
+    }
+  }, [replaceProject, service]);
+
+  const openProjectFolder = useCallback(async (project: HubProject) => {
+    setProjectAction('managing');
+    setProjectMessage(null);
+    try {
+      const updatedProject = await service.openProjectFolder(project.id);
+      if (mountedRef.current) {
+        replaceProject(updatedProject);
+        setProjectMessage(`Opened ${project.name}.`);
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setProjectMessage(errorMessage(error));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setProjectAction('idle');
+      }
+    }
+  }, [replaceProject, service]);
+
+  const openProjectTerminal = useCallback(async (project: HubProject) => {
+    setProjectAction('managing');
+    setProjectMessage(null);
+    try {
+      const updatedProject = await service.openProjectTerminal(project.id);
+      if (mountedRef.current) {
+        replaceProject(updatedProject);
+        setProjectMessage(`Opened a terminal for ${project.name}.`);
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setProjectMessage(errorMessage(error));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setProjectAction('idle');
+      }
+    }
+  }, [replaceProject, service]);
+
+  const copyProjectPath = useCallback(async (project: HubProject) => {
+    setProjectMessage(null);
+    try {
+      await service.copyProjectPath(project.path);
+      if (mountedRef.current) {
+        setProjectMessage('Project path copied to the clipboard.');
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setProjectMessage(errorMessage(error));
+      }
+    }
+  }, [service]);
+
+  const relocateProject = useCallback(async (project: HubProject) => {
+    setProjectAction('managing');
+    setProjectMessage(null);
+    try {
+      const selectedPath = await service.selectProjectDirectory();
+      if (!selectedPath) {
+        return;
+      }
+      const updatedProject = await service.relocateProject(project.id, selectedPath);
+      if (mountedRef.current) {
+        replaceProject(updatedProject);
+        setProjectMessage(`Project relocated to ${updatedProject.path}.`);
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setProjectMessage(errorMessage(error));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setProjectAction('idle');
+      }
+    }
+  }, [replaceProject, service]);
+
+  const removeProject = useCallback(async (project: HubProject) => {
+    if (!globalThis.confirm(`Remove "${project.name}" from the Project Library? The source files and Wiki will not be deleted.`)) {
+      return;
+    }
+    setProjectAction('managing');
+    setProjectMessage(null);
+    try {
+      await service.removeProject(project.id);
+      if (mountedRef.current) {
+        setProjectsState((current) => current.status === 'ready'
+          ? { status: 'ready', projects: current.projects.filter((item) => item.id !== project.id) }
+          : current);
+        setProjectMessage('Project removed from the library. Source files were kept.');
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setProjectMessage(errorMessage(error));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setProjectAction('idle');
+      }
+    }
+  }, [service]);
+
   useEffect(() => {
     let disposed = false;
     let unsubscribe: (() => void) | undefined;
@@ -138,6 +304,18 @@ export function HubApp({ service = defaultService }: HubAppProps) {
     : healthState.status === 'loading'
       ? 'checking'
       : 'unavailable';
+
+  const visibleProjects = projectsState.status === 'ready'
+    ? projectsState.projects
+      .filter((project) => {
+        const query = projectQuery.trim().toLocaleLowerCase();
+        const matchesQuery = query.length === 0
+          || project.name.toLocaleLowerCase().includes(query)
+          || project.path.toLocaleLowerCase().includes(query);
+        return matchesQuery && (!favoriteOnly || project.favorite);
+      })
+      .sort((left, right) => Number(right.favorite) - Number(left.favorite))
+    : [];
 
   return (
     <main className="hub-shell">
@@ -193,13 +371,40 @@ export function HubApp({ service = defaultService }: HubAppProps) {
             type="button"
             className="primary-button"
             data-testid="add-project"
-            disabled={projectAction === 'adding'}
+            disabled={projectAction !== 'idle'}
             onClick={() => void addProject()}
           >
             {projectAction === 'adding' ? 'Selecting…' : 'Add local project'}
           </button>
         </div>
         {projectMessage && <p className="project-message" role="status">{projectMessage}</p>}
+        {projectsState.status === 'ready' && projectsState.projects.length > 0 && (
+          <div className="project-library-tools">
+            <label className="project-search">
+              <span className="sr-only">Filter projects by name or path</span>
+              <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" focusable="false">
+                <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                <path d="m16 16 4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+              <input
+                data-testid="project-filter"
+                type="search"
+                value={projectQuery}
+                onChange={(event) => setProjectQuery(event.target.value)}
+                placeholder="Filter by name or path"
+              />
+            </label>
+            <label className="favorite-filter">
+              <input
+                data-testid="favorite-filter"
+                type="checkbox"
+                checked={favoriteOnly}
+                onChange={(event) => setFavoriteOnly(event.target.checked)}
+              />
+              Favorites only
+            </label>
+          </div>
+        )}
         {projectsState.status === 'loading' && <p className="empty-state" aria-busy="true">Loading registered projects…</p>}
         {projectsState.status === 'error' && (
           <div className="project-error" role="alert">
@@ -212,13 +417,31 @@ export function HubApp({ service = defaultService }: HubAppProps) {
             Add a local code directory to start your project workspace.
           </p>
         )}
-        {projectsState.status === 'ready' && projectsState.projects.length > 0 && (
+        {projectsState.status === 'ready' && projectsState.projects.length > 0 && visibleProjects.length === 0 && (
+          <p className="empty-state" data-testid="no-project-results">
+            No projects match the current filters.
+          </p>
+        )}
+        {projectsState.status === 'ready' && visibleProjects.length > 0 && (
           <div className="project-grid" data-testid="project-list">
-            {projectsState.projects.map((project) => (
+            {visibleProjects.map((project) => (
               <article className="project-card" key={project.id} data-testid={`project-${project.id}`}>
                 <div className="project-card-heading">
                   <div>
-                    <h3>{project.name}</h3>
+                    <div className="project-name-row">
+                      <h3>{project.name}</h3>
+                      <button
+                        type="button"
+                        className={`favorite-button${project.favorite ? ' is-favorite' : ''}`}
+                        data-testid={`favorite-${project.id}`}
+                        aria-label={project.favorite ? `Remove ${project.name} from favorites` : `Add ${project.name} to favorites`}
+                        aria-pressed={project.favorite}
+                        disabled={projectAction !== 'idle'}
+                        onClick={() => void toggleFavorite(project)}
+                      >
+                        <StarIcon filled={project.favorite} />
+                      </button>
+                    </div>
                     <p className="project-kind">{project.sourceControl === 'git' ? 'Git project' : 'Local project'}</p>
                   </div>
                   <span className={`availability-badge availability-${project.availability}`}>
@@ -230,7 +453,55 @@ export function HubApp({ service = defaultService }: HubAppProps) {
                 <dl className="wiki-summary">
                   <div><dt>OpenZread</dt><dd>{project.wiki.openZread}</dd></div>
                   <div><dt>Zread</dt><dd>{project.wiki.zread}</dd></div>
+                  <div><dt>Last opened</dt><dd>{formatLastOpened(project.lastOpenedAt)}</dd></div>
                 </dl>
+                <div className="project-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    data-testid={`open-folder-${project.id}`}
+                    disabled={project.availability !== 'available' || projectAction !== 'idle'}
+                    onClick={() => void openProjectFolder(project)}
+                  >
+                    Open folder
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    data-testid={`open-terminal-${project.id}`}
+                    disabled={project.availability !== 'available' || projectAction !== 'idle'}
+                    onClick={() => void openProjectTerminal(project)}
+                  >
+                    Open terminal
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    data-testid={`copy-path-${project.id}`}
+                    disabled={projectAction !== 'idle'}
+                    onClick={() => void copyProjectPath(project)}
+                  >
+                    Copy path
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    data-testid={`relocate-${project.id}`}
+                    disabled={projectAction !== 'idle'}
+                    onClick={() => void relocateProject(project)}
+                  >
+                    Relocate
+                  </button>
+                  <button
+                    type="button"
+                    className="danger-button"
+                    data-testid={`remove-${project.id}`}
+                    disabled={projectAction !== 'idle'}
+                    onClick={() => void removeProject(project)}
+                  >
+                    Remove
+                  </button>
+                </div>
               </article>
             ))}
           </div>

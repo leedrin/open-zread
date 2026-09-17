@@ -52,6 +52,7 @@ describe('Hub React to application-service tracer bullet', () => {
         return () => undefined;
       },
       selectProjectDirectory: async () => null,
+      copyText: async () => undefined,
     };
     const service = createHubApplicationService(transport);
     let renderer: ReactTestRenderer | undefined;
@@ -93,6 +94,7 @@ describe('Hub React to application-service tracer bullet', () => {
       invoke: async () => ({ service: { status: 'healthy' } }),
       listen: async () => () => undefined,
       selectProjectDirectory: async () => null,
+      copyText: async () => undefined,
     };
     const service = createHubApplicationService(transport);
 
@@ -110,6 +112,7 @@ describe('Hub React to application-service tracer bullet', () => {
       }),
       listen: async () => () => undefined,
       selectProjectDirectory: async () => null,
+      copyText: async () => undefined,
     };
     const service = createHubApplicationService(transport);
 
@@ -129,6 +132,7 @@ describe('Hub React to application-service tracer bullet', () => {
       },
       listen: async () => () => undefined,
       selectProjectDirectory: async () => registeredProject.path,
+      copyText: async () => undefined,
     };
     const service = createHubApplicationService(transport);
 
@@ -149,6 +153,7 @@ describe('Hub React to application-service tracer bullet', () => {
       invoke: async () => [{ ...registeredProject, availability: 'unknown' }],
       listen: async () => () => undefined,
       selectProjectDirectory: async () => null,
+      copyText: async () => undefined,
     };
     const service = createHubApplicationService(transport);
 
@@ -169,6 +174,7 @@ describe('Hub React to application-service tracer bullet', () => {
         selected = true;
         return registeredProject.path;
       },
+      copyText: async () => undefined,
     };
     const service = createHubApplicationService({
       ...transport,

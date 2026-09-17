@@ -10,6 +10,11 @@ export const HUB_COMMANDS = {
   cancelTask: 'cancel_hub_task',
   listProjects: 'list_hub_projects',
   registerProject: 'register_hub_project',
+  setProjectFavorite: 'set_hub_project_favorite',
+  relocateProject: 'relocate_hub_project',
+  removeProject: 'remove_hub_project',
+  openProjectFolder: 'open_hub_project_folder',
+  openProjectTerminal: 'open_hub_project_terminal',
 } as const;
 
 export const HUB_EVENTS = {
@@ -114,6 +119,10 @@ export type HubCommandErrorCode =
   | 'invalid_request'
   | 'task_not_found'
   | 'project_invalid_path'
+  | 'project_not_found'
+  | 'project_duplicate_path'
+  | 'project_unavailable'
+  | 'unsupported_platform'
   | 'project_registry_corrupt'
   | 'service_unavailable'
   | 'internal_error';

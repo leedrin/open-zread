@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+#[cfg(windows)]
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
@@ -186,6 +188,29 @@ fn invalid_path_error(path: &str, detail: &str) -> HubCommandError {
         "project_invalid_path",
         format!("Cannot register project '{path}': {detail}"),
         false,
+    )
+}
+
+fn invalid_project_id_error() -> HubCommandError {
+    command_error("invalid_request", "Project id is required.", false)
+}
+
+fn project_not_found_error(project_id: &str) -> HubCommandError {
+    command_error(
+        "project_not_found",
+        format!("Project '{project_id}' is not registered."),
+        false,
+    )
+}
+
+fn project_unavailable_error(project: &ProjectRecord) -> HubCommandError {
+    command_error(
+        "project_unavailable",
+        format!(
+            "Project '{}' is not available at '{}'.",
+            project.name, project.path
+        ),
+        true,
     )
 }
 
@@ -429,6 +454,31 @@ fn project_view(record: &ProjectRecord) -> HubProject {
     }
 }
 
+fn project_index(registry: &ProjectRegistry, project_id: &str) -> Result<usize, HubCommandError> {
+    let normalized_id = project_id.trim();
+    if normalized_id.is_empty() {
+        return Err(invalid_project_id_error());
+    }
+    registry
+        .projects
+        .iter()
+        .position(|project| project.id == normalized_id)
+        .ok_or_else(|| project_not_found_error(normalized_id))
+}
+
+fn append_previous_path(record: &mut ProjectRecord, path: &str) {
+    let path_key = normalized_path_key(Path::new(path));
+    if normalized_path_key(Path::new(&record.path)) == path_key
+        || record
+            .previous_paths
+            .iter()
+            .any(|previous| normalized_path_key(Path::new(previous)) == path_key)
+    {
+        return;
+    }
+    record.previous_paths.push(path.to_string());
+}
+
 pub(crate) fn list_projects(app: &AppHandle) -> Result<Vec<HubProject>, HubCommandError> {
     let registry = load_registry(&registry_path(app)?)?;
     Ok(registry.projects.iter().map(project_view).collect())
@@ -479,6 +529,133 @@ pub(crate) fn register_project(
         project,
         created: true,
     })
+}
+
+pub(crate) fn set_project_favorite(
+    app: &AppHandle,
+    project_id: &str,
+    favorite: bool,
+) -> Result<HubProject, HubCommandError> {
+    let storage_path = registry_path(app)?;
+    let mut registry = load_registry(&storage_path)?;
+    let index = project_index(&registry, project_id)?;
+    registry.projects[index].favorite = favorite;
+    let project = project_view(&registry.projects[index]);
+    save_registry(&storage_path, &registry)?;
+    Ok(project)
+}
+
+pub(crate) fn relocate_project(
+    app: &AppHandle,
+    project_id: &str,
+    raw_path: &str,
+) -> Result<HubProject, HubCommandError> {
+    let normalized_path = normalize_selected_path(raw_path)?;
+    let normalized_key = normalized_path_key(&normalized_path);
+    let path_string = normalized_path_text(&normalized_path);
+    let storage_path = registry_path(app)?;
+    let mut registry = load_registry(&storage_path)?;
+    let index = project_index(&registry, project_id)?;
+
+    if registry
+        .projects
+        .iter()
+        .enumerate()
+        .any(|(other_index, project)| {
+            other_index != index && normalized_path_key(Path::new(&project.path)) == normalized_key
+        })
+    {
+        return Err(command_error(
+            "project_duplicate_path",
+            "The selected directory is already registered as another Project.".to_string(),
+            false,
+        ));
+    }
+
+    let record = &mut registry.projects[index];
+    let old_path = record.path.clone();
+    if normalized_path_key(Path::new(&old_path)) != normalized_key {
+        append_previous_path(record, &old_path);
+        record.path = path_string;
+    }
+    let project = project_view(record);
+    save_registry(&storage_path, &registry)?;
+    Ok(project)
+}
+
+pub(crate) fn remove_project(app: &AppHandle, project_id: &str) -> Result<(), HubCommandError> {
+    let storage_path = registry_path(app)?;
+    let mut registry = load_registry(&storage_path)?;
+    let index = project_index(&registry, project_id)?;
+    registry.projects.remove(index);
+    save_registry(&storage_path, &registry)
+}
+
+enum ProjectLaunchTarget {
+    Folder,
+    Terminal,
+}
+
+#[cfg(windows)]
+fn launch_project(path: &Path, target: ProjectLaunchTarget) -> Result<(), HubCommandError> {
+    let result = match target {
+        ProjectLaunchTarget::Folder => Command::new("explorer.exe").arg(path).spawn(),
+        ProjectLaunchTarget::Terminal => Command::new("cmd.exe")
+            .args(["/C", "start", "", "cmd.exe"])
+            .current_dir(path)
+            .spawn(),
+    };
+    result.map(|_| ()).map_err(|error| {
+        command_error(
+            "internal_error",
+            format!("Unable to open the Project location: {error}"),
+            true,
+        )
+    })
+}
+
+#[cfg(not(windows))]
+fn launch_project(_path: &Path, _target: ProjectLaunchTarget) -> Result<(), HubCommandError> {
+    Err(command_error(
+        "unsupported_platform",
+        "Opening a Project folder or terminal is currently supported on Windows only.",
+        false,
+    ))
+}
+
+fn open_project(
+    app: &AppHandle,
+    project_id: &str,
+    target: ProjectLaunchTarget,
+) -> Result<HubProject, HubCommandError> {
+    let storage_path = registry_path(app)?;
+    let mut registry = load_registry(&storage_path)?;
+    let index = project_index(&registry, project_id)?;
+    let record = &registry.projects[index];
+    if path_availability(Path::new(&record.path)).0 != "available" {
+        return Err(project_unavailable_error(record));
+    }
+    launch_project(Path::new(&record.path), target)?;
+
+    let record = &mut registry.projects[index];
+    record.last_opened_at = Some(now_millis());
+    let project = project_view(record);
+    save_registry(&storage_path, &registry)?;
+    Ok(project)
+}
+
+pub(crate) fn open_project_folder(
+    app: &AppHandle,
+    project_id: &str,
+) -> Result<HubProject, HubCommandError> {
+    open_project(app, project_id, ProjectLaunchTarget::Folder)
+}
+
+pub(crate) fn open_project_terminal(
+    app: &AppHandle,
+    project_id: &str,
+) -> Result<HubProject, HubCommandError> {
+    open_project(app, project_id, ProjectLaunchTarget::Terminal)
 }
 
 #[cfg(test)]
@@ -585,6 +762,32 @@ mod tests {
             last_opened_at: None,
         };
         assert_eq!(project_view(&record).wiki.open_zread, "partial");
+        remove_dir_all(root).expect("temporary root should be removed");
+    }
+
+    #[test]
+    fn previous_path_history_preserves_unique_locations() {
+        let root = temporary_root("previous-paths");
+        let current = root.join("current");
+        let previous = root.join("previous");
+        let mut record = ProjectRecord {
+            id: "history".to_string(),
+            name: "History".to_string(),
+            path: current.to_string_lossy().into_owned(),
+            previous_paths: Vec::new(),
+            favorite: false,
+            last_opened_at: None,
+        };
+
+        let current_path = record.path.clone();
+        append_previous_path(&mut record, &current_path);
+        append_previous_path(&mut record, &previous.to_string_lossy());
+        append_previous_path(&mut record, &previous.to_string_lossy());
+
+        assert_eq!(
+            record.previous_paths,
+            vec![previous.to_string_lossy().to_string()]
+        );
         remove_dir_all(root).expect("temporary root should be removed");
     }
 }

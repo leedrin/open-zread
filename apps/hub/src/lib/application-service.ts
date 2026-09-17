@@ -17,6 +17,7 @@ import {
 } from '@open-zread/hub-contract';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
+import { writeText as tauriWriteText } from '@tauri-apps/plugin-clipboard-manager';
 import { open as tauriOpen } from '@tauri-apps/plugin-dialog';
 
 export interface HubEvent<T> {
@@ -31,6 +32,7 @@ export interface HubTransport {
   invoke(command: HubCommandName, args?: Record<string, unknown>): Promise<unknown>;
   listen(event: typeof HUB_EVENTS.task, listener: HubEventListener<unknown>): Promise<Unsubscribe>;
   selectProjectDirectory(): Promise<string | null>;
+  copyText(text: string): Promise<void>;
 }
 
 export interface HubApplicationService {
@@ -38,6 +40,12 @@ export interface HubApplicationService {
   listProjects(): Promise<HubProject[]>;
   selectProjectDirectory(): Promise<string | null>;
   registerProject(path: string): Promise<RegisterProjectResponse>;
+  setProjectFavorite(projectId: string, favorite: boolean): Promise<HubProject>;
+  relocateProject(projectId: string, path: string): Promise<HubProject>;
+  removeProject(projectId: string): Promise<void>;
+  openProjectFolder(projectId: string): Promise<HubProject>;
+  openProjectTerminal(projectId: string): Promise<HubProject>;
+  copyProjectPath(path: string): Promise<void>;
   cancelTask(taskId: string): Promise<CancelTaskResponse>;
   subscribeToTaskEvents(listener: (event: HubTaskEvent) => void): Promise<Unsubscribe>;
 }
@@ -56,6 +64,9 @@ const tauriTransport: HubTransport = {
       recursive: false,
       title: 'Select a local project',
     });
+  },
+  copyText(text) {
+    return tauriWriteText(text);
   },
 };
 
@@ -182,6 +193,14 @@ function parseProjectList(value: unknown): HubProject[] {
   return value.map(parseProject);
 }
 
+function invalidRequest(message: string): Promise<never> {
+  return Promise.reject({
+    code: 'invalid_request',
+    message,
+    retryable: false,
+  });
+}
+
 function parseRegisterProjectResponse(value: unknown): RegisterProjectResponse {
   if (!isRecord(value) || typeof value.created !== 'boolean') {
     throw new HubProtocolError('Invalid Hub response: project registration payload is malformed.');
@@ -264,6 +283,58 @@ export function createHubApplicationService(
         .then(parseRegisterProjectResponse);
     },
 
+    setProjectFavorite(projectId, favorite) {
+      const normalizedId = projectId.trim();
+      if (!normalizedId) {
+        return invalidRequest('Project id is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.setProjectFavorite, {
+        projectId: normalizedId,
+        favorite,
+      }).then(parseProject);
+    },
+
+    relocateProject(projectId, path) {
+      const normalizedId = projectId.trim();
+      const normalizedPath = path.trim();
+      if (!normalizedId) {
+        return invalidRequest('Project id is required.');
+      }
+      if (!normalizedPath) {
+        return invalidRequest('Project path is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.relocateProject, {
+        projectId: normalizedId,
+        path: normalizedPath,
+      }).then(parseProject);
+    },
+
+    removeProject(projectId) {
+      const normalizedId = projectId.trim();
+      if (!normalizedId) {
+        return invalidRequest('Project id is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.removeProject, {
+        projectId: normalizedId,
+      }).then(() => undefined);
+    },
+
+    openProjectFolder(projectId) {
+      return openProject(projectId, HUB_COMMANDS.openProjectFolder, transport);
+    },
+
+    openProjectTerminal(projectId) {
+      return openProject(projectId, HUB_COMMANDS.openProjectTerminal, transport);
+    },
+
+    copyProjectPath(path) {
+      const normalizedPath = path.trim();
+      if (!normalizedPath) {
+        return invalidRequest('Project path is required.');
+      }
+      return transport.copyText(normalizedPath);
+    },
+
     cancelTask(taskId) {
       const normalizedTaskId = taskId.trim();
       if (!normalizedTaskId) {
@@ -300,4 +371,16 @@ export function createHubApplicationService(
       });
     },
   };
+}
+
+function openProject(
+  projectId: string,
+  command: typeof HUB_COMMANDS.openProjectFolder | typeof HUB_COMMANDS.openProjectTerminal,
+  transport: HubTransport,
+): Promise<HubProject> {
+  const normalizedId = projectId.trim();
+  if (!normalizedId) {
+    return invalidRequest('Project id is required.');
+  }
+  return transport.invoke(command, { projectId: normalizedId }).then(parseProject);
 }

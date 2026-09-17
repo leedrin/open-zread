@@ -3,5 +3,9 @@
   "identifier": "default",
   "description": "Default permissions for the Open Zread Hub desktop window",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "clipboard-manager:allow-write-text"
+  ]
 }

@@ -2,7 +2,10 @@ use crate::contracts::{
     CancelTaskResponse, HubCommandError, HubHealth, HubProject, HubRunnerInfo, HubServiceHealth,
     HubTaskEvent, RegisterProjectResponse, TASK_EVENT,
 };
-use crate::projects::{list_projects, register_project};
+use crate::projects::{
+    list_projects, open_project_folder, open_project_terminal, register_project, relocate_project,
+    remove_project, set_project_favorite,
+};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -173,6 +176,45 @@ pub fn register_hub_project(
     path: String,
 ) -> Result<RegisterProjectResponse, HubCommandError> {
     register_project(&app, &path)
+}
+
+#[tauri::command]
+pub fn set_hub_project_favorite(
+    app: AppHandle,
+    project_id: String,
+    favorite: bool,
+) -> Result<HubProject, HubCommandError> {
+    set_project_favorite(&app, &project_id, favorite)
+}
+
+#[tauri::command]
+pub fn relocate_hub_project(
+    app: AppHandle,
+    project_id: String,
+    path: String,
+) -> Result<HubProject, HubCommandError> {
+    relocate_project(&app, &project_id, &path)
+}
+
+#[tauri::command]
+pub fn remove_hub_project(app: AppHandle, project_id: String) -> Result<(), HubCommandError> {
+    remove_project(&app, &project_id)
+}
+
+#[tauri::command]
+pub fn open_hub_project_folder(
+    app: AppHandle,
+    project_id: String,
+) -> Result<HubProject, HubCommandError> {
+    open_project_folder(&app, &project_id)
+}
+
+#[tauri::command]
+pub fn open_hub_project_terminal(
+    app: AppHandle,
+    project_id: String,
+) -> Result<HubProject, HubCommandError> {
+    open_project_terminal(&app, &project_id)
 }
 
 /// Cancellation is deliberately explicit and typed even before task execution

@@ -216,11 +216,7 @@ bun run dev --filter=@open-zread/orchestrator # 只开发特定包
 
 ### CLI UI 修改
 
-修改终端 UI 时，严格遵循 `DESIGN.md` 中的设计系统：
-- **颜色**: 使用 Notion 风格的暖色调（`#f6f5f4` warm white, `#31302e` warm dark）
-- **边框**: 超细边框 `1px solid rgba(0,0,0,0.1)`（whisper border）
-- **字体**: NotionInter，display 大标题使用负 letter-spacing（-2.125px at 64px）
-- **阴影**: 多层叠加，单层 opacity 不超过 0.05
+修改终端 UI 时，遵循 `DESIGN.md` 的信息层级和状态语义；ANSI 颜色可以根据终端能力映射，不要求复刻桌面端渐变、圆角或阴影。
 
 ### Agent SDK 修改
 
@@ -252,4 +248,4 @@ bun run release        # 发布到 npm
 
 ## UI 开发规则
 
-编写 UI 代码时，请严格遵循上方导入的 DESIGN.md 文件中指定的设计系统、颜色和组件规范。
+编写桌面 UI 代码时，请严格遵循上方导入的 `DESIGN.md`，尤其是 `--ui-*` token、字体回退链、图标/按钮接口、焦点状态和 Tauri/React 的职责分离。
