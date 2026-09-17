@@ -232,6 +232,98 @@ fn verify_new_path_inside(root: &Path, target: &Path) -> Result<(), HubCommandEr
     Ok(())
 }
 
+fn collect_markdown_files(
+    directory: &Path,
+    files: &mut Vec<PathBuf>,
+) -> Result<(), HubCommandError> {
+    let entries = fs::read_dir(directory).map_err(|read_error| {
+        error(
+            "wiki_read_failed",
+            format!("Unable to inspect Wiki links: {read_error}"),
+            true,
+        )
+    })?;
+    for entry in entries {
+        let path = entry
+            .map_err(|read_error| error("wiki_read_failed", read_error.to_string(), true))?
+            .path();
+        let metadata = fs::symlink_metadata(&path).map_err(|read_error| {
+            error(
+                "wiki_read_failed",
+                format!("Unable to inspect Wiki link source: {read_error}"),
+                true,
+            )
+        })?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if path.is_dir() {
+            if path.file_name().and_then(|name| name.to_str()) == Some(".history") {
+                continue;
+            }
+            collect_markdown_files(&path, files)?;
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("md") {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn rewrite_internal_links(
+    content: &str,
+    old_relative: &str,
+    new_relative: &str,
+    old_file: &str,
+    new_file: &str,
+) -> String {
+    let mut rewritten = content.to_string();
+    for (old, new) in [(old_relative, new_relative), (old_file, new_file)] {
+        for prefix in ["", "./"] {
+            let old_target = format!("]({prefix}{old})");
+            let new_target = format!("]({prefix}{new})");
+            rewritten = rewritten.replace(&old_target, &new_target);
+            let old_anchor = format!("]({prefix}{old}#");
+            let new_anchor = format!("]({prefix}{new}#");
+            rewritten = rewritten.replace(&old_anchor, &new_anchor);
+        }
+    }
+    rewritten
+}
+
+fn link_updates(
+    wiki_root: &Path,
+    old_relative: &str,
+    new_relative: &str,
+    old_file: &str,
+    new_file: &str,
+) -> Result<Vec<(PathBuf, String, String)>, HubCommandError> {
+    if old_relative == new_relative && old_file == new_file {
+        return Ok(Vec::new());
+    }
+    let mut files = Vec::new();
+    collect_markdown_files(wiki_root, &mut files)?;
+    files
+        .into_iter()
+        .map(|path| {
+            let before = fs::read_to_string(&path).map_err(|read_error| {
+                error(
+                    "wiki_read_failed",
+                    format!("Unable to read Wiki link source: {read_error}"),
+                    true,
+                )
+            })?;
+            let after =
+                rewrite_internal_links(&before, old_relative, new_relative, old_file, new_file);
+            Ok((path, before, after))
+        })
+        .filter(|result| {
+            result
+                .as_ref()
+                .is_ok_and(|(_, before, after)| before != after)
+        })
+        .collect()
+}
+
 fn find_page_index(catalog: &Value, slug: &str) -> Result<usize, HubCommandError> {
     catalog
         .get("pages")
@@ -628,6 +720,7 @@ pub(crate) fn update_metadata(
         .to_string();
     let next_slug = new_slug.unwrap_or(slug);
     let next_section = section.unwrap_or(&current_section);
+    let slug_changed = next_slug != slug;
     if !valid_component(next_slug) || !valid_component(next_section) {
         return Err(error(
             "invalid_request",
@@ -656,10 +749,15 @@ pub(crate) fn update_metadata(
         }
     }
     let (old_target, old_relative_path) = page_path(&location, &page_snapshot)?;
-    let next_relative = if location.flat_pages {
-        current_file.clone()
+    let next_file = if slug_changed {
+        format!("{next_slug}.md")
     } else {
-        format!("{next_section}/{current_file}")
+        current_file.clone()
+    };
+    let next_relative = if location.flat_pages {
+        next_file.clone()
+    } else {
+        format!("{next_section}/{next_file}")
     };
     let next_target = safe_page_path(&location.wiki_root, &[&next_relative]).ok_or_else(|| {
         error(
@@ -676,17 +774,20 @@ pub(crate) fn update_metadata(
             false,
         ));
     }
-    let old_content = if moved {
-        Some(fs::read_to_string(&old_target).map_err(|read_error| {
-            error(
-                "wiki_read_failed",
-                format!("Unable to read the Wiki page: {read_error}"),
-                true,
-            )
-        })?)
-    } else {
-        None
-    };
+    let old_content = fs::read_to_string(&old_target).map_err(|read_error| {
+        error(
+            "wiki_read_failed",
+            format!("Unable to read the Wiki page: {read_error}"),
+            true,
+        )
+    })?;
+    let link_updates = link_updates(
+        &location.wiki_root,
+        &old_relative_path,
+        &next_relative,
+        &current_file,
+        &next_file,
+    )?;
     let page = pages
         .get_mut(index)
         .and_then(Value::as_object_mut)
@@ -696,6 +797,9 @@ pub(crate) fn update_metadata(
     }
     if new_slug.is_some() {
         page.insert("slug".to_string(), Value::String(next_slug.to_string()));
+    }
+    if slug_changed {
+        page.insert("file".to_string(), Value::String(next_file));
     }
     if section.is_some() && !location.flat_pages {
         page.insert(
@@ -720,14 +824,43 @@ pub(crate) fn update_metadata(
             serde_json::to_value(files).unwrap_or(Value::Array(Vec::new())),
         );
     }
+    for (path, _, after) in &link_updates {
+        if let Err(write_error) = fs::write(path, after) {
+            for (path, original, _) in &link_updates {
+                let _ = fs::write(path, original);
+            }
+            return Err(error(
+                "internal_error",
+                format!("Unable to update Wiki links: {write_error}"),
+                true,
+            ));
+        }
+    }
     if moved {
         if let Some(parent) = next_target.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|write_error| error("internal_error", write_error.to_string(), true))?;
+            if let Err(write_error) = fs::create_dir_all(parent) {
+                for (path, original, _) in &link_updates {
+                    let _ = fs::write(path, original);
+                }
+                return Err(error("internal_error", write_error.to_string(), true));
+            }
         }
-        verify_new_path_inside(&location.wiki_root, &next_target)?;
-        fs::rename(&old_target, &next_target)
-            .map_err(|write_error| error("internal_error", write_error.to_string(), true))?;
+        if let Err(path_error) = verify_new_path_inside(&location.wiki_root, &next_target) {
+            for (path, original, _) in &link_updates {
+                let _ = fs::write(path, original);
+            }
+            return Err(path_error);
+        }
+        if let Err(rename_error) = fs::rename(&old_target, &next_target) {
+            for (path, original, _) in &link_updates {
+                let _ = fs::write(path, original);
+            }
+            return Err(error(
+                "internal_error",
+                format!("Unable to move the Wiki page: {rename_error}"),
+                true,
+            ));
+        }
     }
     if let Some(order) = order {
         let page_value = pages.remove(index);
@@ -740,18 +873,33 @@ pub(crate) fn update_metadata(
         if moved {
             let _ = fs::rename(&next_target, &old_target);
         }
-        rollback_catalog(&location.catalog_path, &original_catalog);
+        for (path, original, _) in &link_updates {
+            let _ = fs::write(path, original);
+        }
+        if write_error.code != "conflict" {
+            rollback_catalog(&location.catalog_path, &original_catalog);
+        }
         return Err(write_error);
     }
     if location.provider == "open_zread" && moved {
+        let mut history_entries = vec![(old_relative_path, Some(old_content))];
+        for (path, before, _) in &link_updates {
+            let relative = path
+                .strip_prefix(&location.wiki_root)
+                .ok()
+                .map(|value| value.to_string_lossy().replace('\\', "/"));
+            if let Some(relative) = relative {
+                if relative != history_entries[0].0 {
+                    history_entries.push((relative, Some(before.clone())));
+                }
+            }
+        }
+        history_entries.push((next_relative.clone(), None));
         let _ = record_open_zread_structure_snapshot(
             &root,
             &Uuid::new_v4().to_string(),
             &original_catalog,
-            &[
-                (old_relative_path, old_content),
-                (next_relative.clone(), None),
-            ],
+            &history_entries,
         );
     }
     Ok(response(
@@ -801,5 +949,21 @@ mod tests {
             "conflict"
         );
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn internal_links_update_paths_and_preserve_anchors() {
+        let content = "[overview](Core/overview.md#intro) [short](./overview.md) [external](https://example.com/overview.md)";
+        let updated = rewrite_internal_links(
+            content,
+            "Core/overview.md",
+            "Architecture/networking.md",
+            "overview.md",
+            "networking.md",
+        );
+        assert_eq!(
+            updated,
+            "[overview](Architecture/networking.md#intro) [short](./networking.md) [external](https://example.com/overview.md)"
+        );
     }
 }
