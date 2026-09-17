@@ -162,7 +162,71 @@ fn page_path(
             false,
         )
     })?;
-    Ok((path, parts.join("/")))
+    let canonical_root = fs::canonicalize(&location.wiki_root).map_err(|_| {
+        error(
+            "wiki_not_found",
+            "The Wiki root could not be resolved.",
+            true,
+        )
+    })?;
+    let canonical_path = fs::canonicalize(&path).map_err(|_| {
+        error(
+            "wiki_not_found",
+            "The Wiki page file could not be resolved.",
+            true,
+        )
+    })?;
+    if !canonical_path.starts_with(&canonical_root) || !canonical_path.is_file() {
+        return Err(error(
+            "wiki_invalid",
+            "The Wiki page path escapes the Wiki root.",
+            false,
+        ));
+    }
+    Ok((canonical_path, parts.join("/")))
+}
+
+fn verify_new_path_inside(root: &Path, target: &Path) -> Result<(), HubCommandError> {
+    if fs::symlink_metadata(target)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(error(
+            "wiki_invalid",
+            "The Wiki target path cannot be a symbolic link.",
+            false,
+        ));
+    }
+    let canonical_root = fs::canonicalize(root).map_err(|_| {
+        error(
+            "wiki_not_found",
+            "The Wiki root could not be resolved.",
+            true,
+        )
+    })?;
+    let probe = if target.exists() {
+        target.to_path_buf()
+    } else {
+        target
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| target.to_path_buf())
+    };
+    let canonical_probe = fs::canonicalize(probe).map_err(|_| {
+        error(
+            "wiki_not_found",
+            "The Wiki target parent could not be resolved.",
+            true,
+        )
+    })?;
+    if !canonical_probe.starts_with(&canonical_root) {
+        return Err(error(
+            "wiki_invalid",
+            "The Wiki target path escapes the Wiki root.",
+            false,
+        ));
+    }
+    Ok(())
 }
 
 fn find_page_index(catalog: &Value, slug: &str) -> Result<usize, HubCommandError> {
@@ -302,6 +366,7 @@ pub(crate) fn create_page(
         fs::create_dir_all(parent)
             .map_err(|write_error| error("internal_error", write_error.to_string(), true))?;
     }
+    verify_new_path_inside(&location.wiki_root, &target)?;
     fs::write(&target, content)
         .map_err(|write_error| error("internal_error", write_error.to_string(), true))?;
     if let Err(write_error) = write_catalog(&location.catalog_path, &catalog) {
@@ -590,6 +655,7 @@ pub(crate) fn update_metadata(
             fs::create_dir_all(parent)
                 .map_err(|write_error| error("internal_error", write_error.to_string(), true))?;
         }
+        verify_new_path_inside(&location.wiki_root, &next_target)?;
         fs::rename(&old_target, &next_target)
             .map_err(|write_error| error("internal_error", write_error.to_string(), true))?;
     }

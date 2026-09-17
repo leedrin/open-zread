@@ -44,6 +44,8 @@ interface OpenZreadReaderProps {
     section?: string;
     group?: string;
     associatedFiles?: string[];
+    order?: number;
+    clearGroup?: boolean;
   }) => Promise<HubWikiPageMutationResponse>;
   askWiki: (
     projectId: string,
@@ -356,6 +358,9 @@ export function OpenZreadReader({
   const [metadataSlug, setMetadataSlug] = useState('');
   const [metadataTitle, setMetadataTitle] = useState('');
   const [metadataSection, setMetadataSection] = useState('');
+  const [metadataGroup, setMetadataGroup] = useState('');
+  const [metadataAssociatedFiles, setMetadataAssociatedFiles] = useState('');
+  const [metadataOrder, setMetadataOrder] = useState('');
   const [pageMutationBusy, setPageMutationBusy] = useState(false);
   const [pageMutationError, setPageMutationError] = useState<string | null>(null);
   const [qaOpen, setQaOpen] = useState(false);
@@ -627,6 +632,9 @@ export function OpenZreadReader({
     setMetadataSlug(selectedPage.slug);
     setMetadataTitle(selectedPage.title);
     setMetadataSection(selectedPage.section);
+    setMetadataGroup(selectedPage.group ?? '');
+    setMetadataAssociatedFiles(selectedPage.associatedFiles.join(', '));
+    setMetadataOrder(String(Math.max(0, wiki.pages.findIndex((page) => page.slug === selectedPage.slug))));
     setPageMutationError(null);
     setMetadataOpen(true);
   };
@@ -642,6 +650,10 @@ export function OpenZreadReader({
         newSlug: metadataSlug,
         title: metadataTitle,
         section: metadataSection,
+        group: metadataGroup,
+        clearGroup: !metadataGroup.trim(),
+        associatedFiles: metadataAssociatedFiles.split(/[,\n]/).map((path) => path.trim()).filter(Boolean),
+        ...(metadataOrder.trim() ? { order: Number(metadataOrder) } : {}),
       });
       setMetadataOpen(false);
       onHistoryRestored();
@@ -970,6 +982,9 @@ export function OpenZreadReader({
                     <label>Slug<input data-testid="wiki-metadata-slug" value={metadataSlug} onChange={(event) => setMetadataSlug(event.target.value)} /></label>
                     <label>Title<input data-testid="wiki-metadata-title" value={metadataTitle} onChange={(event) => setMetadataTitle(event.target.value)} /></label>
                     <label>Section<input data-testid="wiki-metadata-section" value={metadataSection} onChange={(event) => setMetadataSection(event.target.value)} /></label>
+                    <label>Group (empty clears)<input data-testid="wiki-metadata-group" value={metadataGroup} onChange={(event) => setMetadataGroup(event.target.value)} /></label>
+                    <label>Order<input data-testid="wiki-metadata-order" type="number" min="0" value={metadataOrder} onChange={(event) => setMetadataOrder(event.target.value)} /></label>
+                    <label>Associated source paths<input data-testid="wiki-metadata-associated-files" value={metadataAssociatedFiles} placeholder="src/main.ts, src/app.tsx" onChange={(event) => setMetadataAssociatedFiles(event.target.value)} /></label>
                   </div>
                   <div className="wiki-editor-actions">
                     <button type="button" className="secondary-button" disabled={pageMutationBusy} onClick={() => setMetadataOpen(false)}>Cancel</button>

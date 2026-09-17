@@ -91,15 +91,29 @@ fn catalog_page_path(
             false,
         )
     })?;
-    if !target.is_file() {
-        return Err(error(
+    let canonical_root = fs::canonicalize(page_root).map_err(|_| {
+        error(
             "wiki_not_found",
-            "The Wiki page file could not be read.",
+            "The Wiki root could not be resolved.",
             true,
+        )
+    })?;
+    let canonical_target = fs::canonicalize(&target).map_err(|_| {
+        error(
+            "wiki_not_found",
+            "The Wiki page file could not be resolved.",
+            true,
+        )
+    })?;
+    if !canonical_target.starts_with(&canonical_root) || !canonical_target.is_file() {
+        return Err(error(
+            "wiki_invalid",
+            "The Wiki page path escapes the Wiki root.",
+            false,
         ));
     }
     let relative_path = parts.join("/");
-    Ok((target, relative_path))
+    Ok((canonical_target, relative_path))
 }
 
 fn resolve_page(

@@ -382,7 +382,28 @@ pub(crate) fn read_open_zread_source(
             false,
         )
     })?;
-    let content = fs::read_to_string(&candidate).map_err(|error| {
+    let canonical_root = fs::canonicalize(&root).map_err(|_| {
+        reader_error(
+            "source_invalid_path",
+            "The registered Project could not be resolved.",
+            true,
+        )
+    })?;
+    let canonical_candidate = fs::canonicalize(&candidate).map_err(|_| {
+        reader_error(
+            "source_not_found",
+            "The associated source file could not be read.",
+            true,
+        )
+    })?;
+    if !canonical_candidate.starts_with(&canonical_root) || !canonical_candidate.is_file() {
+        return Err(reader_error(
+            "source_invalid_path",
+            "Source references must stay inside the registered Project.",
+            false,
+        ));
+    }
+    let content = fs::read_to_string(&canonical_candidate).map_err(|error| {
         let code = if error.kind() == std::io::ErrorKind::NotFound {
             "source_not_found"
         } else {
