@@ -14,6 +14,7 @@ export const HUB_COMMANDS = {
   applyWikiChange: 'apply_hub_wiki_change',
   listWikiHistory: 'list_hub_wiki_history',
   restoreWikiHistory: 'restore_hub_wiki_history',
+  searchWiki: 'search_hub_wiki',
   cancelTask: 'cancel_hub_task',
   listProjects: 'list_hub_projects',
   registerProject: 'register_hub_project',
@@ -232,6 +233,22 @@ export interface HubWikiHistoryEntry {
   createdAt: string;
   current: boolean;
   pageCount: number;
+}
+
+export interface HubWikiSearchResult {
+  projectId: string;
+  projectName: string;
+  provider: HubWikiProvider;
+  slug: string;
+  title: string;
+  snippet: string;
+  path: string;
+}
+
+export interface HubWikiSearchResponse {
+  query: string;
+  results: HubWikiSearchResult[];
+  failures: Array<{ projectId: string; projectName: string; provider: HubWikiProvider; message: string }>;
 }
 
 export const HUB_TASK_KINDS = ['generation', 'update', 'maintenance'] as const;

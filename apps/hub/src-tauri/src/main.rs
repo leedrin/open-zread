@@ -4,6 +4,7 @@ mod history;
 mod mutations;
 mod projects;
 mod reader;
+mod search;
 mod tasks;
 
 fn main() {
@@ -21,6 +22,7 @@ fn main() {
             commands::apply_hub_wiki_change,
             commands::list_hub_wiki_history,
             commands::restore_hub_wiki_history,
+            commands::search_hub_wiki,
             commands::cancel_hub_task,
             commands::list_hub_projects,
             commands::register_hub_project,

@@ -239,6 +239,35 @@ pub struct HubWikiHistoryEntry {
     pub page_count: u32,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiSearchResult {
+    pub project_id: String,
+    pub project_name: String,
+    pub provider: &'static str,
+    pub slug: String,
+    pub title: String,
+    pub snippet: String,
+    pub path: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiSearchFailure {
+    pub project_id: String,
+    pub project_name: String,
+    pub provider: &'static str,
+    pub message: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiSearchResponse {
+    pub query: String,
+    pub results: Vec<HubWikiSearchResult>,
+    pub failures: Vec<HubWikiSearchFailure>,
+}
+
 pub const TASK_EVENT: &str = "hub://task-event";
 
 #[cfg(test)]

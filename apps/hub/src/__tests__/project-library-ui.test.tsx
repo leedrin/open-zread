@@ -226,6 +226,21 @@ function createLibraryService(
           pageCount: 1,
         };
       }
+      if (command === 'search_hub_wiki') {
+        return {
+          query: String(args?.query),
+          results: [{
+            projectId: firstProject.id,
+            projectName: firstProject.name,
+            provider: 'open_zread',
+            slug: 'architecture',
+            title: '架构设计',
+            snippet: 'Provider 协同工作',
+            path: '核心/architecture.md',
+          }],
+          failures: [],
+        };
+      }
       if (command === 'read_hub_open_zread_source') {
         return { path: 'src/main.ts', content: 'export const main = true;\n' };
       }
@@ -274,6 +289,34 @@ function createLibraryService(
 }
 
 describe('Project Library UI', () => {
+  test('searches saved Wiki content and opens the matching Provider Reader', async () => {
+    const commands: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const service = createLibraryService(commands, []);
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(<HubApp service={service} />);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'global-search-input' }).props.onChange({ target: { value: '协同' } });
+    });
+    await act(async () => {
+      renderer?.root.findByType('form').props.onSubmit({ preventDefault: () => undefined });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(renderer?.root.findByProps({ 'data-testid': 'search-results' })).toBeDefined();
+    expect(commands).toContainEqual({ command: 'search_hub_wiki', args: { query: '协同' } });
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'search-result-project-1-architecture' }).props.onClick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(renderer?.root.findByProps({ 'data-testid': 'open-zread-reader' })).toBeDefined();
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
   test('filters by name/path and toggles favorite-only view', async () => {
     const service = createLibraryService([], []);
     let renderer: ReactTestRenderer | undefined;

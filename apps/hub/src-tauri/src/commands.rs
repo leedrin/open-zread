@@ -2,7 +2,8 @@ use crate::contracts::{
     CancelTaskResponse, HubCommandError, HubHealth, HubOpenZreadWiki, HubProject,
     HubProviderCapabilities, HubProviderContentHealth, HubProviderGeneratorHealth,
     HubProviderHealth, HubRunnerInfo, HubServiceHealth, HubSourceFile, HubTask, HubTaskEvent,
-    HubWikiAsset, HubWikiChangeSet, HubWikiHistoryEntry, RegisterProjectResponse, TASK_EVENT,
+    HubWikiAsset, HubWikiChangeSet, HubWikiHistoryEntry, HubWikiSearchResponse,
+    RegisterProjectResponse, TASK_EVENT,
 };
 use crate::mutations::ChangeSetCoordinator;
 use crate::projects::{
@@ -655,6 +656,14 @@ pub fn restore_hub_wiki_history(
     history_id: String,
 ) -> Result<HubWikiHistoryEntry, HubCommandError> {
     crate::history::restore_history(&app, &project_id, &provider, &history_id)
+}
+
+#[tauri::command]
+pub fn search_hub_wiki(
+    app: AppHandle,
+    query: String,
+) -> Result<HubWikiSearchResponse, HubCommandError> {
+    crate::search::search_wiki(&app, &query)
 }
 
 #[tauri::command]

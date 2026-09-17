@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { HubProject, HubTask, HubWikiChangeSet, HubWikiHistoryEntry } from '@open-zread/hub-contract';
+import type { HubProject, HubTask, HubWikiChangeSet, HubWikiHistoryEntry, HubWikiSearchResponse } from '@open-zread/hub-contract';
 import {
   createHubApplicationService,
   type HubTransport,
@@ -57,6 +57,20 @@ const historyEntry: HubWikiHistoryEntry = {
   createdAt: '1720000000000',
   current: false,
   pageCount: 1,
+};
+
+const searchResponse: HubWikiSearchResponse = {
+  query: '协同',
+  results: [{
+    projectId: project.id,
+    projectName: project.name,
+    provider: 'open_zread',
+    slug: 'overview',
+    title: 'Overview',
+    snippet: 'Provider 协同工作',
+    path: 'Core/overview.md',
+  }],
+  failures: [],
 };
 
 function createTransport(
@@ -144,6 +158,7 @@ describe('Project Library application-service interface', () => {
       apply_hub_wiki_change: { ...changeSet, status: 'applied' },
       list_hub_wiki_history: [historyEntry],
       restore_hub_wiki_history: historyEntry,
+      search_hub_wiki: searchResponse,
     }, [], calls));
 
     await expect(service.startOpenZreadTask(project.id, 'generate')).resolves.toEqual(task);
@@ -152,6 +167,7 @@ describe('Project Library application-service interface', () => {
     await expect(service.applyWikiChange(changeSet.changeSetId)).resolves.toMatchObject({ status: 'applied' });
     await expect(service.listWikiHistory(project.id, 'open_zread')).resolves.toEqual([historyEntry]);
     await expect(service.restoreWikiHistory(project.id, 'open_zread', historyEntry.id)).resolves.toEqual(historyEntry);
+    await expect(service.searchWiki(' 协同 ')).resolves.toEqual(searchResponse);
     expect(calls).toEqual([
       { command: 'start_hub_open_zread_task', args: { projectId: project.id, operation: 'generate' } },
       { command: 'start_hub_zread_task', args: { projectId: project.id } },
@@ -165,6 +181,7 @@ describe('Project Library application-service interface', () => {
         command: 'restore_hub_wiki_history',
         args: { projectId: project.id, provider: 'open_zread', historyId: historyEntry.id },
       },
+      { command: 'search_hub_wiki', args: { query: '协同' } },
     ]);
   });
 

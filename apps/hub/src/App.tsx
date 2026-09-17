@@ -6,6 +6,7 @@ import type {
   HubOpenZreadOperation,
   HubTask,
   HubTaskEvent,
+  HubWikiSearchResponse,
   HubWikiDocument,
   HubWikiProvider,
 } from '@open-zread/hub-contract';
@@ -33,6 +34,12 @@ type ReaderState =
   | { status: 'loading'; project: HubProject; provider: HubWikiProvider }
   | { status: 'ready'; project: HubProject; wiki: HubWikiDocument }
   | { status: 'error'; project: HubProject; provider: HubWikiProvider; message: string };
+
+type SearchState =
+  | { status: 'idle' }
+  | { status: 'loading'; query: string }
+  | { status: 'ready'; response: HubWikiSearchResponse }
+  | { status: 'error'; message: string };
 
 const EMPTY_READER_SESSION: WikiReaderSession = {
   scrollTop: 0,
@@ -126,6 +133,8 @@ export function HubApp({ service = defaultService }: HubAppProps) {
   const [activeTaskEvent, setActiveTaskEvent] = useState<HubTaskEvent | null>(null);
   const [taskMessage, setTaskMessage] = useState<string | null>(null);
   const [taskClock, setTaskClock] = useState(() => Date.now());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchState, setSearchState] = useState<SearchState>({ status: 'idle' });
   const mountedRef = useRef(true);
 
   const loadHealth = useCallback(async () => {
@@ -175,6 +184,24 @@ export function HubApp({ service = defaultService }: HubAppProps) {
       }
     }
   }, [service]);
+
+  const searchWiki = useCallback(async () => {
+    const query = searchQuery.trim();
+    if (!query) {
+      return;
+    }
+    setSearchState({ status: 'loading', query });
+    try {
+      const response = await service.searchWiki(query);
+      if (mountedRef.current) {
+        setSearchState({ status: 'ready', response });
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setSearchState({ status: 'error', message: errorMessage(error) });
+      }
+    }
+  }, [searchQuery, service]);
 
   const addProject = useCallback(async () => {
     setProjectAction('adding');
@@ -509,6 +536,49 @@ export function HubApp({ service = defaultService }: HubAppProps) {
         </div>
         <span className="runtime-chip">Windows-first desktop</span>
       </header>
+
+      <section className="global-search" aria-label="Search saved Wiki">
+        <form onSubmit={(event) => { event.preventDefault(); void searchWiki(); }}>
+          <input
+            data-testid="global-search-input"
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search saved Wiki pages across Projects…"
+          />
+          <button type="submit" className="primary-button" data-testid="global-search-submit" disabled={searchState.status === 'loading' || searchQuery.trim().length === 0}>
+            {searchState.status === 'loading' ? 'Searching…' : 'Search'}
+          </button>
+        </form>
+        {searchState.status === 'error' && <p className="error-message" role="alert">{searchState.message}</p>}
+        {searchState.status === 'ready' && (
+          <div className="search-results" data-testid="search-results">
+            {searchState.response.results.length === 0 && <p>No saved Wiki matches for “{searchState.response.query}”.</p>}
+            {searchState.response.results.map((result) => (
+              <button
+                type="button"
+                className="search-result"
+                data-testid={`search-result-${result.projectId}-${result.slug}`}
+                key={`${result.projectId}:${result.provider}:${result.slug}`}
+                onClick={() => {
+                  const project = projectsState.status === 'ready'
+                    ? projectsState.projects.find((candidate) => candidate.id === result.projectId)
+                    : undefined;
+                  if (project) {
+                    void openWikiReader(project, result.provider);
+                  }
+                }}
+              >
+                <span><strong>{result.title}</strong><small>{result.projectName} · {result.provider} · {result.path}</small></span>
+                <em>{result.snippet}</em>
+              </button>
+            ))}
+            {searchState.response.failures.length > 0 && (
+              <p className="search-failures">Some Wiki sources could not be indexed: {searchState.response.failures.map((failure) => `${failure.projectName} (${failure.provider})`).join(', ')}</p>
+            )}
+          </div>
+        )}
+      </section>
 
       <section className="hero-card" aria-labelledby="welcome-title">
         <div>

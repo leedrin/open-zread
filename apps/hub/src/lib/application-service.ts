@@ -29,6 +29,7 @@ import {
   type HubOpenZreadOperation,
   type HubWikiChangeSet,
   type HubWikiHistoryEntry,
+  type HubWikiSearchResponse,
   type RegisterProjectResponse,
 } from '@open-zread/hub-contract';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
@@ -76,6 +77,7 @@ export interface HubApplicationService {
   applyWikiChange(changeSetId: string): Promise<HubWikiChangeSet>;
   listWikiHistory(projectId: string, provider: HubWikiProvider): Promise<HubWikiHistoryEntry[]>;
   restoreWikiHistory(projectId: string, provider: HubWikiProvider, historyId: string): Promise<HubWikiHistoryEntry>;
+  searchWiki(query: string): Promise<HubWikiSearchResponse>;
   cancelTask(taskId: string): Promise<CancelTaskResponse>;
   subscribeToTaskEvents(listener: (event: HubTaskEvent) => void): Promise<Unsubscribe>;
 }
@@ -576,6 +578,38 @@ function parseHistoryEntry(value: unknown): HubWikiHistoryEntry {
   };
 }
 
+function parseSearchResponse(value: unknown): HubWikiSearchResponse {
+  if (!isRecord(value) || typeof value.query !== 'string' || !Array.isArray(value.results) || !Array.isArray(value.failures)) {
+    throw new HubProtocolError('Invalid Hub response: search payload is malformed.');
+  }
+  const results = value.results.filter(isRecord).map((result) => {
+    if (result.provider !== 'open_zread' && result.provider !== 'zread') {
+      throw new HubProtocolError('Invalid Hub response: search provider is unsupported.');
+    }
+    return {
+      projectId: requiredString(result.projectId, 'result.projectId'),
+      projectName: requiredString(result.projectName, 'result.projectName'),
+      provider: result.provider as HubWikiProvider,
+      slug: requiredString(result.slug, 'result.slug'),
+      title: requiredString(result.title, 'result.title'),
+      snippet: requiredString(result.snippet, 'result.snippet'),
+      path: requiredString(result.path, 'result.path'),
+    };
+  });
+  const failures = value.failures.filter(isRecord).map((failure) => {
+    if (failure.provider !== 'open_zread' && failure.provider !== 'zread') {
+      throw new HubProtocolError('Invalid Hub response: search failure provider is unsupported.');
+    }
+    return {
+      projectId: requiredString(failure.projectId, 'failure.projectId'),
+      projectName: requiredString(failure.projectName, 'failure.projectName'),
+      provider: failure.provider as HubWikiProvider,
+      message: requiredString(failure.message, 'failure.message'),
+    };
+  });
+  return { query: value.query, results, failures };
+}
+
 /**
  * Create the typed client used by React and future Tauri command adapters.
  * React never receives a filesystem or process capability from this boundary.
@@ -848,6 +882,14 @@ export function createHubApplicationService(
         provider,
         historyId: normalizedHistoryId,
       }).then(parseHistoryEntry);
+    },
+
+    searchWiki(query) {
+      const normalizedQuery = query.trim();
+      if (!normalizedQuery) {
+        return invalidRequest('Search query is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.searchWiki, { query: normalizedQuery }).then(parseSearchResponse);
     },
 
     cancelTask(taskId) {
