@@ -130,6 +130,7 @@ export function HubApp({ service = defaultService }: HubAppProps) {
   const [readerSessions, setReaderSessions] = useState<Record<string, WikiReaderSession>>({});
   const [lastTaskEvent, setLastTaskEvent] = useState<HubTaskEvent | null>(null);
   const [activeTask, setActiveTask] = useState<HubTask | null>(null);
+  const [queuedTasks, setQueuedTasks] = useState<HubTask[]>([]);
   const [activeTaskEvent, setActiveTaskEvent] = useState<HubTaskEvent | null>(null);
   const [taskMessage, setTaskMessage] = useState<string | null>(null);
   const [taskClock, setTaskClock] = useState(() => Date.now());
@@ -344,15 +345,20 @@ export function HubApp({ service = defaultService }: HubAppProps) {
   }, [service]);
 
   const startOpenZreadTask = useCallback(async (project: HubProject, operation: HubOpenZreadOperation) => {
-    if (activeTask) {
-      return;
-    }
     setTaskMessage(null);
-    setActiveTaskEvent(null);
     try {
       const task = await service.startOpenZreadTask(project.id, operation);
       if (mountedRef.current) {
-        setActiveTask(task);
+        const activeTaskInFlight = activeTask !== null
+          && (activeTaskEvent?.taskId !== activeTask.taskId
+            ? activeTask.status === 'queued' || activeTask.status === 'running'
+            : ['queued', 'running', 'cancelling'].includes(activeTaskEvent.status));
+        if (activeTaskInFlight) {
+          setQueuedTasks((current) => [...current, task]);
+        } else {
+          setActiveTaskEvent(null);
+          setActiveTask(task);
+        }
         setTaskMessage(`${operation === 'generate' ? 'Generation' : 'Sync'} started for ${project.name}.`);
       }
     } catch (error) {
@@ -360,18 +366,23 @@ export function HubApp({ service = defaultService }: HubAppProps) {
         setTaskMessage(errorMessage(error));
       }
     }
-  }, [activeTask, service]);
+  }, [activeTask, activeTaskEvent, service]);
 
   const startZreadTask = useCallback(async (project: HubProject) => {
-    if (activeTask) {
-      return;
-    }
     setTaskMessage(null);
-    setActiveTaskEvent(null);
     try {
       const task = await service.startZreadTask(project.id);
       if (mountedRef.current) {
-        setActiveTask(task);
+        const activeTaskInFlight = activeTask !== null
+          && (activeTaskEvent?.taskId !== activeTask.taskId
+            ? activeTask.status === 'queued' || activeTask.status === 'running'
+            : ['queued', 'running', 'cancelling'].includes(activeTaskEvent.status));
+        if (activeTaskInFlight) {
+          setQueuedTasks((current) => [...current, task]);
+        } else {
+          setActiveTaskEvent(null);
+          setActiveTask(task);
+        }
         setTaskMessage(`Zread generation started for ${project.name}.`);
       }
     } catch (error) {
@@ -379,7 +390,22 @@ export function HubApp({ service = defaultService }: HubAppProps) {
         setTaskMessage(errorMessage(error));
       }
     }
-  }, [activeTask, service]);
+  }, [activeTask, activeTaskEvent, service]);
+
+  useEffect(() => {
+    if (!activeTask || !activeTaskEvent || activeTaskEvent.taskId !== activeTask.taskId
+      || !['succeeded', 'failed', 'cancelled', 'interrupted'].includes(activeTaskEvent.status)) {
+      return;
+    }
+    setQueuedTasks((current) => {
+      const [next, ...remaining] = current;
+      if (next) {
+        setActiveTask(next);
+        setActiveTaskEvent(null);
+      }
+      return remaining;
+    });
+  }, [activeTask, activeTaskEvent]);
 
   const cancelActiveTask = useCallback(async () => {
     if (!activeTask) {
@@ -526,6 +552,23 @@ export function HubApp({ service = defaultService }: HubAppProps) {
     ? currentTaskEvent.status
     : activeTask?.status;
   const taskBusy = activeTaskStatus === 'queued' || activeTaskStatus === 'running' || activeTaskStatus === 'cancelling';
+  const retryActiveTask = useCallback(() => {
+    if (!activeTask || taskBusy) {
+      return;
+    }
+    const project = projectsState.status === 'ready'
+      ? projectsState.projects.find((item) => item.id === activeTask.projectId)
+      : undefined;
+    if (!project) {
+      setTaskMessage('The project for this task is no longer registered.');
+      return;
+    }
+    if (activeTask.provider === 'zread') {
+      void startZreadTask(project);
+    } else {
+      void startOpenZreadTask(project, activeTask.operation);
+    }
+  }, [activeTask, projectsState, startOpenZreadTask, startZreadTask, taskBusy]);
 
   return (
     <main className="hub-shell">
@@ -948,9 +991,19 @@ export function HubApp({ service = defaultService }: HubAppProps) {
             </p>
           )}
           {taskMessage && <p className="task-panel-message" role="status">{taskMessage}</p>}
+          {queuedTasks.length > 0 && (
+            <p className="task-panel-message" data-testid="queued-task-count" role="status">
+              {queuedTasks.length} task(s) queued; Hub will run them serially.
+            </p>
+          )}
           {taskBusy && (
             <button type="button" className="danger-button" data-testid="cancel-active-task" onClick={() => void cancelActiveTask()}>
               Cancel task
+            </button>
+          )}
+          {!taskBusy && activeTaskStatus && (
+            <button type="button" className="secondary-button" data-testid="retry-active-task" onClick={retryActiveTask}>
+              Retry task
             </button>
           )}
         </section>

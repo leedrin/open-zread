@@ -5,14 +5,14 @@ use crate::contracts::{
 use crate::projects::list_projects;
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 const MODEL_LABEL: &str = "Hub shared model configuration";
@@ -20,6 +20,18 @@ const MODEL_LABEL: &str = "Hub shared model configuration";
 #[derive(Default, Clone)]
 pub struct TaskCoordinator {
     processes: Arc<Mutex<HashMap<String, TaskProcess>>>,
+    queue: Arc<Mutex<VecDeque<QueuedTask>>>,
+    starting_next: Arc<AtomicBool>,
+    starting_identity: Arc<Mutex<Option<QueuedTask>>>,
+}
+
+#[derive(Clone)]
+struct QueuedTask {
+    task_id: String,
+    project_id: String,
+    provider: &'static str,
+    operation: &'static str,
+    started_at: String,
 }
 
 struct TaskProcess {
@@ -83,6 +95,65 @@ fn emit_event(app: &AppHandle, event: HubTaskEvent) {
 
 fn status_is_terminal(status: &str) -> bool {
     matches!(status, "succeeded" | "failed" | "cancelled" | "interrupted")
+}
+
+fn task_is_busy(coordinator: &TaskCoordinator) -> bool {
+    coordinator
+        .processes
+        .lock()
+        .map(|processes| !processes.is_empty())
+        .unwrap_or(true)
+        || coordinator
+            .queue
+            .lock()
+            .map(|queue| !queue.is_empty())
+            .unwrap_or(true)
+}
+
+fn queued_identity(coordinator: &TaskCoordinator) -> Option<QueuedTask> {
+    coordinator
+        .starting_identity
+        .lock()
+        .ok()
+        .and_then(|mut identity| identity.take())
+}
+
+fn queue_task(
+    app: &AppHandle,
+    coordinator: &TaskCoordinator,
+    task: QueuedTask,
+) -> Result<HubTask, HubCommandError> {
+    coordinator
+        .queue
+        .lock()
+        .map_err(|_| command_error("internal_error", "Task coordinator is unavailable.", true))?
+        .push_back(task.clone());
+    emit_event(
+        app,
+        HubTaskEvent {
+            task_id: task.task_id.clone(),
+            kind: task_kind(task.operation),
+            status: "queued",
+            phase: "queued".to_string(),
+            occurred_at: now_millis(),
+            message: Some("Task queued behind the active Hub task.".to_string()),
+            progress: None,
+        },
+    );
+    Ok(HubTask {
+        task_id: task.task_id,
+        kind: task_kind(task.operation),
+        status: "queued",
+        project_id: task.project_id,
+        provider: task.provider,
+        operation: task.operation,
+        model: if task.provider == "zread" {
+            "Zread native configuration"
+        } else {
+            MODEL_LABEL
+        },
+        started_at: task.started_at,
+    })
 }
 
 fn restore_zread_current(state: &ZreadTaskState) {
@@ -418,12 +489,60 @@ fn start_process_observers(
         if let Ok(mut processes) = coordinator.processes.lock() {
             processes.remove(&task_id);
         }
+        start_next_queued(&app, &coordinator);
     });
+}
+
+fn start_next_queued(app: &AppHandle, coordinator: &TaskCoordinator) {
+    let next = {
+        let Ok(processes) = coordinator.processes.lock() else {
+            return;
+        };
+        if !processes.is_empty() {
+            return;
+        }
+        coordinator
+            .queue
+            .lock()
+            .ok()
+            .and_then(|mut queue| queue.pop_front())
+    };
+    let Some(next) = next else {
+        return;
+    };
+    if let Ok(mut identity) = coordinator.starting_identity.lock() {
+        *identity = Some(next.clone());
+    }
+    coordinator.starting_next.store(true, Ordering::SeqCst);
+    let result = if next.provider == "zread" {
+        start_zread_task(app, coordinator, &next.project_id)
+    } else {
+        start_open_zread_task(app, coordinator, &next.project_id, next.operation)
+    };
+    coordinator.starting_next.store(false, Ordering::SeqCst);
+    if let Err(error) = result {
+        if let Ok(mut identity) = coordinator.starting_identity.lock() {
+            let _ = identity.take();
+        }
+        emit_event(
+            app,
+            HubTaskEvent {
+                task_id: next.task_id,
+                kind: task_kind(next.operation),
+                status: "failed",
+                phase: "queue-start-failed".to_string(),
+                occurred_at: now_millis(),
+                message: Some(error.message),
+                progress: None,
+            },
+        );
+        start_next_queued(app, coordinator);
+    }
 }
 
 pub(crate) fn start_open_zread_task(
     app: &AppHandle,
-    coordinator: &State<'_, TaskCoordinator>,
+    coordinator: &TaskCoordinator,
     project_id: &str,
     operation: &str,
 ) -> Result<HubTask, HubCommandError> {
@@ -460,14 +579,39 @@ pub(crate) fn start_open_zread_task(
         ));
     }
     let executable = embedded_runner_executable(app)?;
-    let task_id = Uuid::new_v4().to_string();
+    let operation_name = if operation == "sync" {
+        "sync"
+    } else {
+        "generate"
+    };
+    if !coordinator.starting_next.load(Ordering::SeqCst) && task_is_busy(coordinator) {
+        return queue_task(
+            app,
+            coordinator,
+            QueuedTask {
+                task_id: Uuid::new_v4().to_string(),
+                project_id: project.id,
+                provider: "open_zread",
+                operation: operation_name,
+                started_at: now_millis(),
+            },
+        );
+    }
+    let identity = queued_identity(coordinator);
+    let task_id = identity
+        .as_ref()
+        .map(|identity| identity.task_id.clone())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
     let kind = task_kind(operation);
-    let started_at = now_millis();
+    let started_at = identity
+        .as_ref()
+        .map(|identity| identity.started_at.clone())
+        .unwrap_or_else(now_millis);
     let mut process = Command::new(executable)
         .arg("wiki")
         .arg("--stdio")
         .arg("--operation")
-        .arg(operation)
+        .arg(operation_name)
         .current_dir(&project.path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -529,7 +673,7 @@ pub(crate) fn start_open_zread_task(
         BufReader::new(stdout),
         cancel_requested,
         terminal_emitted,
-        coordinator.inner().clone(),
+        coordinator.clone(),
         TaskFlavor::OpenZread,
     );
     Ok(HubTask {
@@ -538,11 +682,7 @@ pub(crate) fn start_open_zread_task(
         status: "running",
         project_id: project.id,
         provider: "open_zread",
-        operation: if operation == "sync" {
-            "sync"
-        } else {
-            "generate"
-        },
+        operation: operation_name,
         model: MODEL_LABEL,
         started_at,
     })
@@ -564,7 +704,7 @@ fn previous_zread_state(project_root: &Path) -> ZreadTaskState {
 
 pub(crate) fn start_zread_task(
     app: &AppHandle,
-    coordinator: &State<'_, TaskCoordinator>,
+    coordinator: &TaskCoordinator,
     project_id: &str,
 ) -> Result<HubTask, HubCommandError> {
     let project_id = project_id.trim();
@@ -593,9 +733,29 @@ pub(crate) fn start_zread_task(
         ));
     }
     let executable = native_zread_runner_executable(app)?;
+    if !coordinator.starting_next.load(Ordering::SeqCst) && task_is_busy(coordinator) {
+        return queue_task(
+            app,
+            coordinator,
+            QueuedTask {
+                task_id: Uuid::new_v4().to_string(),
+                project_id: project.id,
+                provider: "zread",
+                operation: "generate",
+                started_at: now_millis(),
+            },
+        );
+    }
     let flavor = TaskFlavor::Zread(previous_zread_state(Path::new(&project.path)));
-    let task_id = Uuid::new_v4().to_string();
-    let started_at = now_millis();
+    let identity = queued_identity(coordinator);
+    let task_id = identity
+        .as_ref()
+        .map(|identity| identity.task_id.clone())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let started_at = identity
+        .as_ref()
+        .map(|identity| identity.started_at.clone())
+        .unwrap_or_else(now_millis);
     let mut process = Command::new(executable)
         .arg("generate")
         .arg("--stdio")
@@ -656,7 +816,7 @@ pub(crate) fn start_zread_task(
         BufReader::new(stdout),
         cancel_requested,
         terminal_emitted,
-        coordinator.inner().clone(),
+        coordinator.clone(),
         flavor,
     );
     Ok(HubTask {
@@ -673,7 +833,7 @@ pub(crate) fn start_zread_task(
 
 pub(crate) fn cancel_task(
     app: &AppHandle,
-    coordinator: &State<'_, TaskCoordinator>,
+    coordinator: &TaskCoordinator,
     task_id: &str,
 ) -> Result<CancelTaskResponse, HubCommandError> {
     let task_id = task_id.trim();
@@ -703,7 +863,42 @@ pub(crate) fn cancel_task(
                 format!("Task '{task_id}' is not active."),
                 false,
             )
-        })?;
+        });
+    let Ok(task) = task else {
+        let queued = {
+            let mut queue = coordinator.queue.lock().map_err(|_| {
+                command_error("internal_error", "Task coordinator is unavailable.", true)
+            })?;
+            queue
+                .iter()
+                .position(|queued| queued.task_id == task_id)
+                .and_then(|index| queue.remove(index))
+        };
+        let Some(queued) = queued else {
+            return Err(command_error(
+                "task_not_found",
+                format!("Task '{task_id}' is not active."),
+                false,
+            ));
+        };
+        emit_event(
+            app,
+            HubTaskEvent {
+                task_id: task_id.to_string(),
+                kind: task_kind(queued.operation),
+                status: "cancelled",
+                phase: "cancelled".to_string(),
+                occurred_at: now_millis(),
+                message: Some("Queued task cancelled by the user.".to_string()),
+                progress: None,
+            },
+        );
+        return Ok(CancelTaskResponse {
+            task_id: task_id.to_string(),
+            accepted: true,
+            status: "cancelled",
+        });
+    };
     if task.3.load(Ordering::SeqCst) {
         return Err(command_error(
             "task_not_found",
