@@ -399,52 +399,6 @@ fn restore_open_history(root: &Path, id: &str) -> Result<(), HubCommandError> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn structure_snapshot_restores_catalog_and_created_or_deleted_files() {
-        let root =
-            std::env::temp_dir().join(format!("open-zread-history-{}", uuid::Uuid::new_v4()));
-        let wiki_root = root.join(".open-zread").join("wiki");
-        fs::create_dir_all(&wiki_root).expect("wiki root should be created");
-        let original_catalog =
-            br#"{"pages":[{"slug":"overview","file":"overview.md","section":"Core"}]}"#;
-        fs::write(wiki_root.join("wiki.json"), original_catalog)
-            .expect("catalog should be written");
-        fs::write(wiki_root.join("overview.md"), "# Before\n").expect("page should be written");
-        record_open_zread_structure_snapshot(
-            &root,
-            "change-1",
-            original_catalog,
-            &[
-                ("overview.md".to_string(), Some("# Before\n".to_string())),
-                ("new.md".to_string(), None),
-            ],
-        )
-        .expect("snapshot should be recorded");
-        fs::write(
-            wiki_root.join("wiki.json"),
-            br#"{"pages":[{"slug":"new","file":"new.md","section":"Core"}]}"#,
-        )
-        .expect("changed catalog should be written");
-        fs::write(wiki_root.join("new.md"), "# New\n").expect("new page should be written");
-
-        restore_open_history(&root, "change-1").expect("snapshot should restore");
-        assert_eq!(
-            fs::read(wiki_root.join("wiki.json")).unwrap(),
-            original_catalog
-        );
-        assert_eq!(
-            fs::read_to_string(wiki_root.join("overview.md")).unwrap(),
-            "# Before\n"
-        );
-        assert!(!wiki_root.join("new.md").exists());
-        fs::remove_dir_all(root).expect("temporary history should be removed");
-    }
-}
-
 fn restore_zread_history(root: &Path, id: &str) -> Result<(), HubCommandError> {
     let pointer = id
         .strip_prefix("versions/")
@@ -503,4 +457,50 @@ pub(crate) fn restore_history(
                 true,
             )
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn structure_snapshot_restores_catalog_and_created_or_deleted_files() {
+        let root =
+            std::env::temp_dir().join(format!("open-zread-history-{}", uuid::Uuid::new_v4()));
+        let wiki_root = root.join(".open-zread").join("wiki");
+        fs::create_dir_all(&wiki_root).expect("wiki root should be created");
+        let original_catalog =
+            br#"{"pages":[{"slug":"overview","file":"overview.md","section":"Core"}]}"#;
+        fs::write(wiki_root.join("wiki.json"), original_catalog)
+            .expect("catalog should be written");
+        fs::write(wiki_root.join("overview.md"), "# Before\n").expect("page should be written");
+        record_open_zread_structure_snapshot(
+            &root,
+            "change-1",
+            original_catalog,
+            &[
+                ("overview.md".to_string(), Some("# Before\n".to_string())),
+                ("new.md".to_string(), None),
+            ],
+        )
+        .expect("snapshot should be recorded");
+        fs::write(
+            wiki_root.join("wiki.json"),
+            br#"{"pages":[{"slug":"new","file":"new.md","section":"Core"}]}"#,
+        )
+        .expect("changed catalog should be written");
+        fs::write(wiki_root.join("new.md"), "# New\n").expect("new page should be written");
+
+        restore_open_history(&root, "change-1").expect("snapshot should restore");
+        assert_eq!(
+            fs::read(wiki_root.join("wiki.json")).unwrap(),
+            original_catalog
+        );
+        assert_eq!(
+            fs::read_to_string(wiki_root.join("overview.md")).unwrap(),
+            "# Before\n"
+        );
+        assert!(!wiki_root.join("new.md").exists());
+        fs::remove_dir_all(root).expect("temporary history should be removed");
+    }
 }

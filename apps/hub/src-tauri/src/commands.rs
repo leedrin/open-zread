@@ -620,7 +620,7 @@ pub fn start_hub_open_zread_task(
     project_id: String,
     operation: String,
 ) -> Result<HubTask, HubCommandError> {
-    crate::tasks::start_open_zread_task(&app, &coordinator, &project_id, &operation)
+    crate::tasks::start_open_zread_task(&app, coordinator.inner(), &project_id, &operation)
 }
 
 #[tauri::command]
@@ -629,7 +629,7 @@ pub fn start_hub_zread_task(
     coordinator: State<'_, TaskCoordinator>,
     project_id: String,
 ) -> Result<HubTask, HubCommandError> {
-    crate::tasks::start_zread_task(&app, &coordinator, &project_id)
+    crate::tasks::start_zread_task(&app, coordinator.inner(), &project_id)
 }
 
 #[tauri::command]
@@ -1334,7 +1334,7 @@ pub fn cancel_hub_task(
     coordinator: State<'_, TaskCoordinator>,
     task_id: String,
 ) -> Result<CancelTaskResponse, HubCommandError> {
-    crate::tasks::cancel_task(&app, &coordinator, &task_id)
+    crate::tasks::cancel_task(&app, coordinator.inner(), &task_id)
 }
 
 #[cfg(test)]
