@@ -282,7 +282,7 @@ fn source_control(path: &Path) -> &'static str {
     }
 }
 
-fn safe_relative_path(value: &str) -> bool {
+pub(crate) fn safe_relative_path(value: &str) -> bool {
     if value.trim().is_empty() || Path::new(value).is_absolute() {
         return false;
     }
@@ -294,7 +294,7 @@ fn safe_relative_path(value: &str) -> bool {
     })
 }
 
-fn safe_page_path(root: &Path, parts: &[&str]) -> Option<PathBuf> {
+pub(crate) fn safe_page_path(root: &Path, parts: &[&str]) -> Option<PathBuf> {
     if parts.iter().any(|part| !safe_relative_path(part)) {
         return None;
     }
@@ -341,7 +341,8 @@ fn inspect_catalog(catalog_path: &Path, page_root: &Path, flat_pages: bool) -> &
     let mut has_missing_page = false;
     for page in pages {
         let Some(file) = page.get("file").and_then(Value::as_str) else {
-            return "invalid";
+            has_missing_page = true;
+            continue;
         };
         let section = if flat_pages {
             None
@@ -350,7 +351,8 @@ fn inspect_catalog(catalog_path: &Path, page_root: &Path, flat_pages: bool) -> &
                 None => None,
                 Some(value) => {
                     let Some(section) = value.as_str() else {
-                        return "invalid";
+                        has_missing_page = true;
+                        continue;
                     };
                     Some(section)
                 }
@@ -363,8 +365,12 @@ fn inspect_catalog(catalog_path: &Path, page_root: &Path, flat_pages: bool) -> &
         let Some(page_path) = safe_page_path(page_root, &parts) else {
             return "invalid";
         };
-        match fs::metadata(page_path) {
-            Ok(metadata) if metadata.is_file() => {}
+        match fs::metadata(&page_path) {
+            Ok(metadata) if metadata.is_file() => {
+                if fs::read_to_string(&page_path).is_err() {
+                    has_missing_page = true;
+                }
+            }
             Ok(_) => return "invalid",
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => has_missing_page = true,
             Err(_) => has_missing_page = true,
@@ -464,6 +470,16 @@ fn project_index(registry: &ProjectRegistry, project_id: &str) -> Result<usize, 
         .iter()
         .position(|project| project.id == normalized_id)
         .ok_or_else(|| project_not_found_error(normalized_id))
+}
+
+pub(crate) fn project_root(app: &AppHandle, project_id: &str) -> Result<PathBuf, HubCommandError> {
+    let registry = load_registry(&registry_path(app)?)?;
+    let index = project_index(&registry, project_id)?;
+    let project = &registry.projects[index];
+    if path_availability(Path::new(&project.path)).0 != "available" {
+        return Err(project_unavailable_error(project));
+    }
+    Ok(PathBuf::from(&project.path))
 }
 
 fn append_previous_path(record: &mut ProjectRecord, path: &str) {
@@ -756,6 +772,30 @@ mod tests {
         let record = ProjectRecord {
             id: "partial".to_string(),
             name: "Partial".to_string(),
+            path: root.to_string_lossy().into_owned(),
+            previous_paths: Vec::new(),
+            favorite: false,
+            last_opened_at: None,
+        };
+        assert_eq!(project_view(&record).wiki.open_zread, "partial");
+        remove_dir_all(root).expect("temporary root should be removed");
+    }
+
+    #[test]
+    fn catalog_with_one_corrupt_page_entry_is_partial_not_invalid() {
+        let root = temporary_root("corrupt-page-entry");
+        let wiki_root = root.join(".open-zread/wiki");
+        create_dir_all(&wiki_root).expect("wiki directory should be created");
+        write(
+            wiki_root.join("wiki.json"),
+            br#"{"pages":[{"title":"Missing file field"},{"file":"valid.md"}]}"#,
+        )
+        .expect("catalog should be written");
+        write(wiki_root.join("valid.md"), b"# Valid").expect("page should be written");
+
+        let record = ProjectRecord {
+            id: "partial-entry".to_string(),
+            name: "Partial entry".to_string(),
             path: root.to_string_lossy().into_owned(),
             previous_paths: Vec::new(),
             favorite: false,

@@ -15,6 +15,9 @@ export const HUB_COMMANDS = {
   removeProject: 'remove_hub_project',
   openProjectFolder: 'open_hub_project_folder',
   openProjectTerminal: 'open_hub_project_terminal',
+  readOpenZreadWiki: 'read_hub_open_zread_wiki',
+  readOpenZreadSource: 'read_hub_open_zread_source',
+  readOpenZreadAsset: 'read_hub_open_zread_asset',
 } as const;
 
 export const HUB_EVENTS = {
@@ -73,6 +76,47 @@ export interface RegisterProjectResponse {
   created: boolean;
 }
 
+export type HubWikiPageStatus = 'readable' | 'missing' | 'unreadable';
+
+export interface HubWikiCatalog {
+  id?: string;
+  generatedAt?: string;
+  language?: string;
+  native: Record<string, unknown>;
+}
+
+export interface HubWikiPage {
+  slug: string;
+  title: string;
+  file: string;
+  section: string;
+  group?: string;
+  level?: string;
+  associatedFiles: string[];
+  status: HubWikiPageStatus;
+  content?: string;
+  error?: string;
+  native: Record<string, unknown>;
+}
+
+export interface HubOpenZreadWiki {
+  provider: 'open_zread';
+  status: Extract<HubWikiStatus, 'readable' | 'partial'>;
+  catalog: HubWikiCatalog;
+  pages: HubWikiPage[];
+}
+
+export interface HubSourceFile {
+  path: string;
+  content: string;
+}
+
+export interface HubWikiAsset {
+  path: string;
+  mimeType: string;
+  bytes: number[];
+}
+
 export type HubTaskKind = 'generation' | 'update' | 'maintenance';
 export type HubTaskStatus =
   | 'queued'
@@ -124,6 +168,13 @@ export type HubCommandErrorCode =
   | 'project_unavailable'
   | 'unsupported_platform'
   | 'project_registry_corrupt'
+  | 'wiki_not_found'
+  | 'wiki_invalid'
+  | 'wiki_read_failed'
+  | 'source_not_found'
+  | 'source_invalid_path'
+  | 'asset_not_found'
+  | 'asset_invalid_path'
   | 'service_unavailable'
   | 'internal_error';
 

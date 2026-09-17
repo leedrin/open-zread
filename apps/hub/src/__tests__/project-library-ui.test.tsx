@@ -68,6 +68,43 @@ function createLibraryService(
       if (command === 'open_hub_project_terminal') {
         return { ...firstProject, lastOpenedAt: '124' };
       }
+      if (command === 'read_hub_open_zread_wiki') {
+        return {
+          provider: 'open_zread',
+          status: 'partial',
+          catalog: {
+            id: 'catalog-1',
+            generatedAt: '2026-09-17T00:00:00.000Z',
+            language: 'zh',
+            native: { providerMeta: { opaque: 'keep-me' } },
+          },
+          pages: [
+            {
+              slug: 'architecture',
+              title: '架构设计',
+              file: 'architecture.md',
+              section: '核心',
+              associatedFiles: ['src/main.ts'],
+              status: 'readable',
+              content: '# 架构设计\n\n```mermaid\nflowchart LR\n```',
+              native: { providerOnly: true },
+            },
+            {
+              slug: 'broken',
+              title: '损坏页面',
+              file: 'broken.md',
+              section: '核心',
+              associatedFiles: [],
+              status: 'missing',
+              error: 'The Markdown page is missing.',
+              native: { providerOnly: 'kept' },
+            },
+          ],
+        };
+      }
+      if (command === 'read_hub_open_zread_source') {
+        return { path: 'src/main.ts', content: 'export const main = true;\n' };
+      }
       if (command === 'remove_hub_project') {
         projects = projects.filter((project) => project.id !== args?.projectId);
         return null;
@@ -167,5 +204,45 @@ describe('Project Library UI', () => {
         renderer?.unmount();
       });
     }
+  });
+
+  test('opens the OpenZread Reader with Mermaid, partial-page state, and source references', async () => {
+    const service = createLibraryService([], []);
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(<HubApp service={service} />);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'open-open-zread-project-1' }).props.onClick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(renderer?.root.findByProps({ 'data-testid': 'open-zread-reader' })).toBeDefined();
+    expect(renderer?.root.findByProps({ 'data-testid': 'wiki-page-architecture' })).toBeDefined();
+    expect(renderer?.root.findByProps({ 'data-testid': 'mermaid-block' })).toBeDefined();
+
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'wiki-page-nav-broken' }).props.onClick();
+    });
+    expect(renderer?.root.findByProps({ 'data-testid': 'wiki-page-error-broken' }).children.join(' '))
+      .toContain('missing');
+
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'wiki-page-nav-architecture' }).props.onClick();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'source-src-main-ts' }).props.onClick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(renderer?.root.findByProps({ 'data-testid': 'source-content-text' }).children.join(' '))
+      .toContain('export const main = true;');
+
+    await act(async () => {
+      renderer?.unmount();
+    });
   });
 });

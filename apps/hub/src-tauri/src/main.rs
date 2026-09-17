@@ -1,6 +1,7 @@
 mod commands;
 mod contracts;
 mod projects;
+mod reader;
 
 fn main() {
     tauri::Builder::default()
@@ -15,7 +16,10 @@ fn main() {
             commands::relocate_hub_project,
             commands::remove_hub_project,
             commands::open_hub_project_folder,
-            commands::open_hub_project_terminal
+            commands::open_hub_project_terminal,
+            commands::read_hub_open_zread_wiki,
+            commands::read_hub_open_zread_source,
+            commands::read_hub_open_zread_asset
         ])
         .run(tauri::generate_context!())
         .expect("error while running Open Zread Hub");

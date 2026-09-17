@@ -9,6 +9,12 @@ import {
   type HubProject,
   type HubProjectAvailability,
   type HubProjectWikiSummary,
+  type HubOpenZreadWiki,
+  type HubSourceFile,
+  type HubWikiAsset,
+  type HubWikiCatalog,
+  type HubWikiPage,
+  type HubWikiPageStatus,
   type HubSourceControl,
   type HubWikiStatus,
   type HubRunnerInfo,
@@ -46,6 +52,9 @@ export interface HubApplicationService {
   openProjectFolder(projectId: string): Promise<HubProject>;
   openProjectTerminal(projectId: string): Promise<HubProject>;
   copyProjectPath(path: string): Promise<void>;
+  readOpenZreadWiki(projectId: string): Promise<HubOpenZreadWiki>;
+  readOpenZreadSource(projectId: string, path: string): Promise<HubSourceFile>;
+  readOpenZreadAsset(projectId: string, pagePath: string, assetPath: string): Promise<HubWikiAsset>;
   cancelTask(taskId: string): Promise<CancelTaskResponse>;
   subscribeToTaskEvents(listener: (event: HubTaskEvent) => void): Promise<Unsubscribe>;
 }
@@ -193,6 +202,118 @@ function parseProjectList(value: unknown): HubProject[] {
   return value.map(parseProject);
 }
 
+const WIKI_PAGE_STATUSES: HubWikiPageStatus[] = ['readable', 'missing', 'unreadable'];
+
+function parseNativeObject(value: unknown, field: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new HubProtocolError(`Invalid Hub response: ${field} native fields are malformed.`);
+  }
+  return value;
+}
+
+function parseWikiCatalog(value: unknown): HubWikiCatalog {
+  if (!isRecord(value)) {
+    throw new HubProtocolError('Invalid Hub response: OpenZread catalog is malformed.');
+  }
+  if (value.id !== undefined && typeof value.id !== 'string') {
+    throw new HubProtocolError('Invalid Hub response: OpenZread catalog id is malformed.');
+  }
+  if (value.generatedAt !== undefined && typeof value.generatedAt !== 'string') {
+    throw new HubProtocolError('Invalid Hub response: OpenZread catalog timestamp is malformed.');
+  }
+  if (value.language !== undefined && typeof value.language !== 'string') {
+    throw new HubProtocolError('Invalid Hub response: OpenZread catalog language is malformed.');
+  }
+  return {
+    ...(typeof value.id === 'string' ? { id: value.id } : {}),
+    ...(typeof value.generatedAt === 'string' ? { generatedAt: value.generatedAt } : {}),
+    ...(typeof value.language === 'string' ? { language: value.language } : {}),
+    native: parseNativeObject(value.native, 'catalog'),
+  };
+}
+
+function parseWikiPage(value: unknown): HubWikiPage {
+  if (!isRecord(value)) {
+    throw new HubProtocolError('Invalid Hub response: OpenZread page is malformed.');
+  }
+  const status = requiredString(value.status, 'page.status');
+  if (!WIKI_PAGE_STATUSES.includes(status as HubWikiPageStatus)) {
+    throw new HubProtocolError('Invalid Hub response: unknown OpenZread page status.');
+  }
+  if (!Array.isArray(value.associatedFiles) || value.associatedFiles.some((path) => typeof path !== 'string')) {
+    throw new HubProtocolError('Invalid Hub response: OpenZread source references are malformed.');
+  }
+  if (value.content !== undefined && typeof value.content !== 'string') {
+    throw new HubProtocolError('Invalid Hub response: OpenZread page content is malformed.');
+  }
+  if (value.error !== undefined && typeof value.error !== 'string') {
+    throw new HubProtocolError('Invalid Hub response: OpenZread page error is malformed.');
+  }
+  if (value.group !== undefined && typeof value.group !== 'string') {
+    throw new HubProtocolError('Invalid Hub response: OpenZread page group is malformed.');
+  }
+  if (value.level !== undefined && typeof value.level !== 'string') {
+    throw new HubProtocolError('Invalid Hub response: OpenZread page level is malformed.');
+  }
+  return {
+    slug: requiredString(value.slug, 'page.slug'),
+    title: requiredString(value.title, 'page.title'),
+    file: requiredString(value.file, 'page.file'),
+    section: requiredString(value.section, 'page.section'),
+    ...(typeof value.group === 'string' ? { group: value.group } : {}),
+    ...(typeof value.level === 'string' ? { level: value.level } : {}),
+    associatedFiles: value.associatedFiles,
+    status: status as HubWikiPageStatus,
+    ...(typeof value.content === 'string' ? { content: value.content } : {}),
+    ...(typeof value.error === 'string' ? { error: value.error } : {}),
+    native: parseNativeObject(value.native, 'page'),
+  };
+}
+
+function parseOpenZreadWiki(value: unknown): HubOpenZreadWiki {
+  if (!isRecord(value) || value.provider !== 'open_zread') {
+    throw new HubProtocolError('Invalid Hub response: OpenZread Wiki payload is malformed.');
+  }
+  if (value.status !== 'readable' && value.status !== 'partial') {
+    throw new HubProtocolError('Invalid Hub response: unknown OpenZread Wiki status.');
+  }
+  if (!Array.isArray(value.pages)) {
+    throw new HubProtocolError('Invalid Hub response: OpenZread page list is malformed.');
+  }
+  return {
+    provider: 'open_zread',
+    status: value.status,
+    catalog: parseWikiCatalog(value.catalog),
+    pages: value.pages.map(parseWikiPage),
+  };
+}
+
+function parseSourceFile(value: unknown): HubSourceFile {
+  if (!isRecord(value)) {
+    throw new HubProtocolError('Invalid Hub response: source file payload is malformed.');
+  }
+  if (typeof value.content !== 'string') {
+    throw new HubProtocolError('Invalid Hub response: source.content must be a string.');
+  }
+  return {
+    path: requiredString(value.path, 'source.path'),
+    content: value.content,
+  };
+}
+
+function parseWikiAsset(value: unknown): HubWikiAsset {
+  if (!isRecord(value) || !Array.isArray(value.bytes) || value.bytes.some((byte) => (
+    typeof byte !== 'number' || !Number.isInteger(byte) || byte < 0 || byte > 255
+  ))) {
+    throw new HubProtocolError('Invalid Hub response: Wiki asset payload is malformed.');
+  }
+  return {
+    path: requiredString(value.path, 'asset.path'),
+    mimeType: requiredString(value.mimeType, 'asset.mimeType'),
+    bytes: value.bytes,
+  };
+}
+
 function invalidRequest(message: string): Promise<never> {
   return Promise.reject({
     code: 'invalid_request',
@@ -333,6 +454,50 @@ export function createHubApplicationService(
         return invalidRequest('Project path is required.');
       }
       return transport.copyText(normalizedPath);
+    },
+
+    readOpenZreadWiki(projectId) {
+      const normalizedId = projectId.trim();
+      if (!normalizedId) {
+        return invalidRequest('Project id is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.readOpenZreadWiki, { projectId: normalizedId })
+        .then(parseOpenZreadWiki);
+    },
+
+    readOpenZreadSource(projectId, path) {
+      const normalizedId = projectId.trim();
+      const normalizedPath = path.trim();
+      if (!normalizedId) {
+        return invalidRequest('Project id is required.');
+      }
+      if (!normalizedPath) {
+        return invalidRequest('Source path is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.readOpenZreadSource, {
+        projectId: normalizedId,
+        path: normalizedPath,
+      }).then(parseSourceFile);
+    },
+
+    readOpenZreadAsset(projectId, pagePath, assetPath) {
+      const normalizedId = projectId.trim();
+      const normalizedPagePath = pagePath.trim();
+      const normalizedAssetPath = assetPath.trim();
+      if (!normalizedId) {
+        return invalidRequest('Project id is required.');
+      }
+      if (!normalizedPagePath) {
+        return invalidRequest('Wiki page path is required.');
+      }
+      if (!normalizedAssetPath) {
+        return invalidRequest('Wiki asset path is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.readOpenZreadAsset, {
+        projectId: normalizedId,
+        pagePath: normalizedPagePath,
+        assetPath: normalizedAssetPath,
+      }).then(parseWikiAsset);
     },
 
     cancelTask(taskId) {

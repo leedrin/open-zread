@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { HubHealth, HubProject, HubTaskEvent } from '@open-zread/hub-contract';
+import type { HubHealth, HubOpenZreadWiki, HubProject, HubTaskEvent } from '@open-zread/hub-contract';
 import {
   createHubApplicationService,
   type HubApplicationService,
 } from './lib/application-service';
+import { OpenZreadReader } from './components/OpenZreadReader';
 import './app.css';
 
 type HealthState =
@@ -17,6 +18,12 @@ type ProjectsState =
   | { status: 'error'; message: string };
 
 type ProjectAction = 'idle' | 'adding' | 'managing';
+
+type ReaderState =
+  | { status: 'closed' }
+  | { status: 'loading'; project: HubProject }
+  | { status: 'ready'; project: HubProject; wiki: HubOpenZreadWiki }
+  | { status: 'error'; project: HubProject; message: string };
 
 export interface HubAppProps {
   service?: HubApplicationService;
@@ -66,6 +73,7 @@ export function HubApp({ service = defaultService }: HubAppProps) {
   const [projectMessage, setProjectMessage] = useState<string | null>(null);
   const [projectQuery, setProjectQuery] = useState('');
   const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [readerState, setReaderState] = useState<ReaderState>({ status: 'closed' });
   const [lastTaskEvent, setLastTaskEvent] = useState<HubTaskEvent | null>(null);
   const mountedRef = useRef(true);
 
@@ -217,6 +225,20 @@ export function HubApp({ service = defaultService }: HubAppProps) {
     } catch (error) {
       if (mountedRef.current) {
         setProjectMessage(errorMessage(error));
+      }
+    }
+  }, [service]);
+
+  const openOpenZreadReader = useCallback(async (project: HubProject) => {
+    setReaderState({ status: 'loading', project });
+    try {
+      const wiki = await service.readOpenZreadWiki(project.id);
+      if (mountedRef.current) {
+        setReaderState({ status: 'ready', project, wiki });
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setReaderState({ status: 'error', project, message: errorMessage(error) });
       }
     }
   }, [service]);
@@ -459,6 +481,20 @@ export function HubApp({ service = defaultService }: HubAppProps) {
                   <button
                     type="button"
                     className="secondary-button"
+                    data-testid={`open-open-zread-${project.id}`}
+                    disabled={project.availability !== 'available'
+                      || project.wiki.openZread === 'missing'
+                      || project.wiki.openZread === 'unavailable'
+                      || projectAction !== 'idle'}
+                    onClick={() => void openOpenZreadReader(project)}
+                  >
+                    {readerState.status === 'loading' && readerState.project.id === project.id
+                      ? 'Opening…'
+                      : 'Open OpenZread'}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
                     data-testid={`open-folder-${project.id}`}
                     disabled={project.availability !== 'available' || projectAction !== 'idle'}
                     onClick={() => void openProjectFolder(project)}
@@ -507,6 +543,25 @@ export function HubApp({ service = defaultService }: HubAppProps) {
           </div>
         )}
       </section>
+
+      {readerState.status === 'loading' && (
+        <section className="wiki-reader-loading" aria-live="polite">Opening the OpenZread Reader…</section>
+      )}
+      {readerState.status === 'error' && (
+        <section className="wiki-reader-loading project-error" role="alert">
+          <p>{readerState.message}</p>
+          <button type="button" className="secondary-button" onClick={() => setReaderState({ status: 'closed' })}>Dismiss</button>
+        </section>
+      )}
+      {readerState.status === 'ready' && (
+        <OpenZreadReader
+          key={`${readerState.project.id}-${readerState.wiki.catalog.id ?? 'catalog'}`}
+          project={readerState.project}
+          wiki={readerState.wiki}
+          service={service}
+          onClose={() => setReaderState({ status: 'closed' })}
+        />
+      )}
 
       <section className="surface-grid" aria-label="Hub capabilities">
         <article className="surface-card">

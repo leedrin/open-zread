@@ -1,11 +1,13 @@
 use crate::contracts::{
-    CancelTaskResponse, HubCommandError, HubHealth, HubProject, HubRunnerInfo, HubServiceHealth,
-    HubTaskEvent, RegisterProjectResponse, TASK_EVENT,
+    CancelTaskResponse, HubCommandError, HubHealth, HubOpenZreadWiki, HubProject, HubRunnerInfo,
+    HubServiceHealth, HubSourceFile, HubTaskEvent, HubWikiAsset, RegisterProjectResponse,
+    TASK_EVENT,
 };
 use crate::projects::{
     list_projects, open_project_folder, open_project_terminal, register_project, relocate_project,
     remove_project, set_project_favorite,
 };
+use crate::reader::{read_open_zread_asset, read_open_zread_source, read_open_zread_wiki};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -215,6 +217,33 @@ pub fn open_hub_project_terminal(
     project_id: String,
 ) -> Result<HubProject, HubCommandError> {
     open_project_terminal(&app, &project_id)
+}
+
+#[tauri::command]
+pub fn read_hub_open_zread_wiki(
+    app: AppHandle,
+    project_id: String,
+) -> Result<HubOpenZreadWiki, HubCommandError> {
+    read_open_zread_wiki(&app, &project_id)
+}
+
+#[tauri::command]
+pub fn read_hub_open_zread_source(
+    app: AppHandle,
+    project_id: String,
+    path: String,
+) -> Result<HubSourceFile, HubCommandError> {
+    read_open_zread_source(&app, &project_id, &path)
+}
+
+#[tauri::command]
+pub fn read_hub_open_zread_asset(
+    app: AppHandle,
+    project_id: String,
+    page_path: String,
+    asset_path: String,
+) -> Result<HubWikiAsset, HubCommandError> {
+    read_open_zread_asset(&app, &project_id, &page_path, &asset_path)
 }
 
 /// Cancellation is deliberately explicit and typed even before task execution
