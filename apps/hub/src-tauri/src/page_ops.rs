@@ -6,8 +6,11 @@ use crate::projects::{project_root, safe_page_path, safe_relative_path};
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use tauri::AppHandle;
 use uuid::Uuid;
+
+static WIKI_MUTATION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 struct CatalogLocation {
     provider: &'static str,
@@ -260,6 +263,28 @@ fn write_catalog(path: &Path, value: &Value) -> Result<(), HubCommandError> {
     })
 }
 
+fn write_catalog_if_unchanged(
+    path: &Path,
+    original: &[u8],
+    value: &Value,
+) -> Result<(), HubCommandError> {
+    let current = fs::read(path).map_err(|read_error| {
+        error(
+            "wiki_read_failed",
+            format!("Unable to re-read the Wiki catalog: {read_error}"),
+            true,
+        )
+    })?;
+    if current != original {
+        return Err(error(
+            "conflict",
+            "The Wiki catalog changed outside Hub; review the structure change again.",
+            true,
+        ));
+    }
+    write_catalog(path, value)
+}
+
 fn rollback_catalog(path: &Path, original: &[u8]) {
     let _ = fs::write(path, original);
 }
@@ -281,7 +306,7 @@ fn response(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn create_page(
+fn create_page_impl(
     app: &AppHandle,
     project_id: &str,
     provider: &str,
@@ -369,9 +394,13 @@ pub(crate) fn create_page(
     verify_new_path_inside(&location.wiki_root, &target)?;
     fs::write(&target, content)
         .map_err(|write_error| error("internal_error", write_error.to_string(), true))?;
-    if let Err(write_error) = write_catalog(&location.catalog_path, &catalog) {
+    if let Err(write_error) =
+        write_catalog_if_unchanged(&location.catalog_path, &original_catalog, &catalog)
+    {
         let _ = fs::remove_file(&target);
-        rollback_catalog(&location.catalog_path, &original_catalog);
+        if write_error.code != "conflict" {
+            rollback_catalog(&location.catalog_path, &original_catalog);
+        }
         return Err(write_error);
     }
     if location.provider == "open_zread" {
@@ -391,12 +420,45 @@ pub(crate) fn create_page(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_page(
+    app: &AppHandle,
+    project_id: &str,
+    provider: &str,
+    slug: &str,
+    title: &str,
+    section: &str,
+    group: Option<&str>,
+    content: &str,
+    associated_files: &[String],
+) -> Result<HubWikiPageMutationResponse, HubCommandError> {
+    let _guard = WIKI_MUTATION_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| error("internal_error", "Wiki mutation lock is unavailable.", true))?;
+    create_page_impl(
+        app,
+        project_id,
+        provider,
+        slug,
+        title,
+        section,
+        group,
+        content,
+        associated_files,
+    )
+}
+
 pub(crate) fn create_pages(
     app: &AppHandle,
     project_id: &str,
     provider: &str,
     pages: &[CreatePageInput<'_>],
 ) -> Result<HubWikiBatchMutationResponse, HubCommandError> {
+    let _guard = WIKI_MUTATION_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| error("internal_error", "Wiki mutation lock is unavailable.", true))?;
     if pages.is_empty() {
         return Err(error(
             "invalid_request",
@@ -427,7 +489,7 @@ pub(crate) fn create_pages(
                 false,
             ));
         }
-        match create_page(
+        match create_page_impl(
             app,
             project_id,
             provider,
@@ -465,6 +527,10 @@ pub(crate) fn delete_page(
     provider: &str,
     slug: &str,
 ) -> Result<HubWikiPageMutationResponse, HubCommandError> {
+    let _guard = WIKI_MUTATION_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| error("internal_error", "Wiki mutation lock is unavailable.", true))?;
     let root = project_root(app, project_id)?;
     let location = location(&root, provider)?;
     let (original_catalog, mut catalog) = read_catalog(&location)?;
@@ -489,7 +555,7 @@ pub(crate) fn delete_page(
         .and_then(Value::as_array_mut)
         .expect("validated pages array")
         .remove(index);
-    write_catalog(&location.catalog_path, &catalog)?;
+    write_catalog_if_unchanged(&location.catalog_path, &original_catalog, &catalog)?;
     if let Err(remove_error) = fs::remove_file(&target) {
         rollback_catalog(&location.catalog_path, &original_catalog);
         let _ = fs::write(&target, original_page);
@@ -533,6 +599,10 @@ pub(crate) fn update_metadata(
     order: Option<u32>,
     clear_group: bool,
 ) -> Result<HubWikiPageMutationResponse, HubCommandError> {
+    let _guard = WIKI_MUTATION_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| error("internal_error", "Wiki mutation lock is unavailable.", true))?;
     let root = project_root(app, project_id)?;
     let location = location(&root, provider)?;
     let (original_catalog, mut catalog) = read_catalog(&location)?;
@@ -664,7 +734,9 @@ pub(crate) fn update_metadata(
         let target_index = (order as usize).min(pages.len());
         pages.insert(target_index, page_value);
     }
-    if let Err(write_error) = write_catalog(&location.catalog_path, &catalog) {
+    if let Err(write_error) =
+        write_catalog_if_unchanged(&location.catalog_path, &original_catalog, &catalog)
+    {
         if moved {
             let _ = fs::rename(&next_target, &old_target);
         }
@@ -712,5 +784,22 @@ mod tests {
         assert!(!valid_relative("../secrets.txt"));
         assert!(!valid_relative("/absolute/path"));
         assert!(!valid_relative("C:\\secrets.txt"));
+    }
+
+    #[test]
+    fn catalog_write_refuses_an_external_change() {
+        let root = std::env::temp_dir().join(format!("open-zread-catalog-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("test root should be created");
+        let path = root.join("wiki.json");
+        let original = br#"{"pages":[]}"#;
+        fs::write(&path, original).expect("catalog should be written");
+        fs::write(&path, br#"{"pages":[{"slug":"external"}]}"#)
+            .expect("external update should be written");
+        let result = write_catalog_if_unchanged(&path, original, &serde_json::json!({"pages": []}));
+        assert_eq!(
+            result.expect_err("external change should conflict").code,
+            "conflict"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }
