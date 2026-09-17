@@ -25,7 +25,7 @@ program
   .command("wiki", { isDefault: true })
   .description(t.cli.wikiDesc)
   .option('--stdio', 'Run a machine-readable Hub task')
-  .option('--operation <operation>', 'Hub operation: generate or sync', 'generate')
+  .option('--operation <operation>', 'Hub operation: generate, sync, ask, rewrite, or draft', 'generate')
   .action(async (options: { stdio?: boolean; operation?: string }) => {
     if (options.stdio) {
       const operation = options.operation;

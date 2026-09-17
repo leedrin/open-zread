@@ -280,6 +280,14 @@ pub struct HubWikiPageMutationResponse {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HubWikiBatchMutationResponse {
+    pub project_id: String,
+    pub provider: &'static str,
+    pub mutations: Vec<HubWikiPageMutationResponse>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HubWikiMergeConflict {
     pub base: String,
     pub local: String,

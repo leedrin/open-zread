@@ -16,6 +16,7 @@ export const HUB_COMMANDS = {
   restoreWikiHistory: 'restore_hub_wiki_history',
   searchWiki: 'search_hub_wiki',
   createWikiPage: 'create_hub_wiki_page',
+  createWikiPages: 'create_hub_wiki_pages',
   deleteWikiPage: 'delete_hub_wiki_page',
   updateWikiPageMetadata: 'update_hub_wiki_page_metadata',
   mergeWikiText: 'merge_hub_wiki_text',
@@ -266,6 +267,12 @@ export interface HubWikiPageMutationResponse {
   slug: string;
   action: HubWikiPageMutationAction;
   relativePath: string;
+}
+
+export interface HubWikiBatchMutationResponse {
+  projectId: string;
+  provider: HubWikiProvider;
+  mutations: HubWikiPageMutationResponse[];
 }
 
 export type HubWikiMergeStatus = 'clean' | 'conflicted';

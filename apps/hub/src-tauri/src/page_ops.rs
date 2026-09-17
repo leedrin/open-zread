@@ -1,4 +1,6 @@
-use crate::contracts::{HubCommandError, HubWikiPageMutationResponse};
+use crate::contracts::{
+    HubCommandError, HubWikiBatchMutationResponse, HubWikiPageMutationResponse,
+};
 use crate::history::record_open_zread_structure_snapshot;
 use crate::projects::{project_root, safe_page_path, safe_relative_path};
 use serde_json::{Map, Value};
@@ -12,6 +14,15 @@ struct CatalogLocation {
     wiki_root: PathBuf,
     catalog_path: PathBuf,
     flat_pages: bool,
+}
+
+pub(crate) struct CreatePageInput<'a> {
+    pub slug: &'a str,
+    pub title: &'a str,
+    pub section: &'a str,
+    pub group: Option<&'a str>,
+    pub content: &'a str,
+    pub associated_files: &'a [String],
 }
 
 fn error(code: &'static str, message: impl Into<String>, retryable: bool) -> HubCommandError {
@@ -86,6 +97,27 @@ fn location(root: &Path, provider: &str) -> Result<CatalogLocation, HubCommandEr
 }
 
 fn read_catalog(location: &CatalogLocation) -> Result<(Vec<u8>, Value), HubCommandError> {
+    let canonical_root = fs::canonicalize(&location.wiki_root).map_err(|_| {
+        error(
+            "wiki_not_found",
+            "The Wiki root could not be resolved.",
+            true,
+        )
+    })?;
+    let canonical_catalog = fs::canonicalize(&location.catalog_path).map_err(|_| {
+        error(
+            "wiki_not_found",
+            "The Wiki catalog could not be resolved.",
+            true,
+        )
+    })?;
+    if !canonical_catalog.starts_with(&canonical_root) || !canonical_catalog.is_file() {
+        return Err(error(
+            "wiki_invalid",
+            "The Wiki catalog path escapes the Wiki root.",
+            false,
+        ));
+    }
     let original = fs::read(&location.catalog_path).map_err(|_| {
         error(
             "wiki_not_found",
@@ -292,6 +324,74 @@ pub(crate) fn create_page(
         "created",
         relative_path,
     ))
+}
+
+pub(crate) fn create_pages(
+    app: &AppHandle,
+    project_id: &str,
+    provider: &str,
+    pages: &[CreatePageInput<'_>],
+) -> Result<HubWikiBatchMutationResponse, HubCommandError> {
+    if pages.is_empty() {
+        return Err(error(
+            "invalid_request",
+            "At least one Wiki page is required.",
+            false,
+        ));
+    }
+    let root = project_root(app, project_id)?;
+    let location = location(&root, provider)?;
+    let (original_catalog, _) = read_catalog(&location)?;
+    let mut mutations = Vec::with_capacity(pages.len());
+    for page in pages {
+        if mutations
+            .iter()
+            .any(|mutation: &HubWikiPageMutationResponse| mutation.slug == page.slug)
+        {
+            for mutation in &mutations {
+                if let Some(target) =
+                    safe_page_path(&location.wiki_root, &[&mutation.relative_path])
+                {
+                    let _ = fs::remove_file(target);
+                }
+            }
+            rollback_catalog(&location.catalog_path, &original_catalog);
+            return Err(error(
+                "conflict",
+                format!("Page slug '{}' is duplicated in the batch.", page.slug),
+                false,
+            ));
+        }
+        match create_page(
+            app,
+            project_id,
+            provider,
+            page.slug,
+            page.title,
+            page.section,
+            page.group,
+            page.content,
+            page.associated_files,
+        ) {
+            Ok(mutation) => mutations.push(mutation),
+            Err(batch_error) => {
+                for mutation in &mutations {
+                    if let Some(target) =
+                        safe_page_path(&location.wiki_root, &[&mutation.relative_path])
+                    {
+                        let _ = fs::remove_file(target);
+                    }
+                }
+                rollback_catalog(&location.catalog_path, &original_catalog);
+                return Err(batch_error);
+            }
+        }
+    }
+    Ok(HubWikiBatchMutationResponse {
+        project_id: project_id.to_string(),
+        provider: location.provider,
+        mutations,
+    })
 }
 
 pub(crate) fn delete_page(

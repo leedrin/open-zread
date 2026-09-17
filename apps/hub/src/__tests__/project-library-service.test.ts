@@ -5,6 +5,7 @@ import type {
   HubWikiChangeSet,
   HubWikiHistoryEntry,
   HubWikiAnswerResponse,
+  HubWikiBatchMutationResponse,
   HubWikiMergeResponse,
   HubWikiPageDraftResponse,
   HubWikiPageMutationResponse,
@@ -89,6 +90,12 @@ const pageMutation: HubWikiPageMutationResponse = {
   slug: 'provider-collaboration',
   action: 'created',
   relativePath: 'Architecture/provider-collaboration.md',
+};
+
+const batchMutation: HubWikiBatchMutationResponse = {
+  projectId: project.id,
+  provider: 'open_zread',
+  mutations: [pageMutation, { ...pageMutation, slug: 'second-page', relativePath: 'Architecture/second-page.md' }],
 };
 
 const mergeResponse: HubWikiMergeResponse = {
@@ -201,6 +208,7 @@ describe('Project Library application-service interface', () => {
       restore_hub_wiki_history: historyEntry,
       search_hub_wiki: searchResponse,
       create_hub_wiki_page: pageMutation,
+      create_hub_wiki_pages: batchMutation,
       delete_hub_wiki_page: { ...pageMutation, action: 'deleted' },
       update_hub_wiki_page_metadata: { ...pageMutation, action: 'updated' },
       merge_hub_wiki_text: mergeResponse,
@@ -224,6 +232,22 @@ describe('Project Library application-service interface', () => {
       content: '# Collaboration',
       associatedFiles: ['src/provider.ts'],
     })).resolves.toEqual(pageMutation);
+    await expect(service.createWikiPages(project.id, 'open_zread', [
+      {
+        slug: 'provider-collaboration',
+        title: 'Provider Collaboration',
+        section: 'Architecture',
+        content: '# Collaboration',
+        associatedFiles: ['src/provider.ts'],
+      },
+      {
+        slug: 'second-page',
+        title: 'Second page',
+        section: 'Architecture',
+        content: '# Second',
+        associatedFiles: [],
+      },
+    ])).resolves.toEqual(batchMutation);
     await expect(service.deleteWikiPage(project.id, 'open_zread', ' provider-collaboration ')).resolves.toMatchObject({ action: 'deleted' });
     await expect(service.updateWikiPageMetadata(project.id, 'open_zread', 'provider-collaboration', {
       newSlug: 'provider-collaboration-v2',
@@ -259,6 +283,29 @@ describe('Project Library application-service interface', () => {
           group: 'Core',
           content: '# Collaboration',
           associatedFiles: ['src/provider.ts'],
+        },
+      },
+      {
+        command: 'create_hub_wiki_pages',
+        args: {
+          projectId: project.id,
+          provider: 'open_zread',
+          pages: [
+            {
+              slug: 'provider-collaboration',
+              title: 'Provider Collaboration',
+              section: 'Architecture',
+              content: '# Collaboration',
+              associatedFiles: ['src/provider.ts'],
+            },
+            {
+              slug: 'second-page',
+              title: 'Second page',
+              section: 'Architecture',
+              content: '# Second',
+              associatedFiles: [],
+            },
+          ],
         },
       },
       {

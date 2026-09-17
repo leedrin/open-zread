@@ -34,6 +34,7 @@ import {
   type HubWikiMergeResponse,
   type HubWikiAnswerResponse,
   type HubWikiPageDraftResponse,
+  type HubWikiBatchMutationResponse,
   type RegisterProjectResponse,
 } from '@open-zread/hub-contract';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
@@ -102,6 +103,7 @@ export interface HubApplicationService {
   restoreWikiHistory(projectId: string, provider: HubWikiProvider, historyId: string): Promise<HubWikiHistoryEntry>;
   searchWiki(query: string): Promise<HubWikiSearchResponse>;
   createWikiPage(projectId: string, provider: HubWikiProvider, input: CreateWikiPageInput): Promise<HubWikiPageMutationResponse>;
+  createWikiPages(projectId: string, provider: HubWikiProvider, inputs: CreateWikiPageInput[]): Promise<HubWikiBatchMutationResponse>;
   deleteWikiPage(projectId: string, provider: HubWikiProvider, slug: string): Promise<HubWikiPageMutationResponse>;
   updateWikiPageMetadata(
     projectId: string,
@@ -734,6 +736,17 @@ function parsePageDraftResponse(value: unknown): HubWikiPageDraftResponse {
   };
 }
 
+function parseBatchMutationResponse(value: unknown): HubWikiBatchMutationResponse {
+  if (!isRecord(value) || (value.provider !== 'open_zread' && value.provider !== 'zread') || !Array.isArray(value.mutations)) {
+    throw new HubProtocolError('Invalid Hub response: Wiki batch mutation payload is malformed.');
+  }
+  return {
+    projectId: requiredString(value.projectId, 'batchMutation.projectId'),
+    provider: value.provider,
+    mutations: value.mutations.map(parseWikiPageMutationResponse),
+  };
+}
+
 /**
  * Create the typed client used by React and future Tauri command adapters.
  * React never receives a filesystem or process capability from this boundary.
@@ -1037,6 +1050,28 @@ export function createHubApplicationService(
         content: input.content,
         associatedFiles: input.associatedFiles,
       }).then(parseWikiPageMutationResponse);
+    },
+
+    createWikiPages(projectId, provider, inputs) {
+      const normalizedId = projectId.trim();
+      if (!normalizedId || inputs.length === 0) {
+        return invalidRequest('Project id and at least one Wiki page are required.');
+      }
+      if (provider !== 'open_zread' && provider !== 'zread') {
+        return invalidRequest('Wiki provider is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.createWikiPages, {
+        projectId: normalizedId,
+        provider,
+        pages: inputs.map((input) => ({
+          slug: input.slug.trim(),
+          title: input.title.trim(),
+          section: input.section.trim(),
+          ...(input.group?.trim() ? { group: input.group.trim() } : {}),
+          content: input.content,
+          associatedFiles: input.associatedFiles,
+        })),
+      }).then(parseBatchMutationResponse);
     },
 
     deleteWikiPage(projectId, provider, slug) {

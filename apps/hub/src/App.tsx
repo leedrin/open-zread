@@ -960,6 +960,7 @@ export function HubApp({ service = defaultService }: HubAppProps) {
           listHistory={service.listWikiHistory}
           restoreHistory={service.restoreWikiHistory}
           createPage={service.createWikiPage}
+          createPages={service.createWikiPages}
           deletePage={service.deleteWikiPage}
           updatePageMetadata={service.updateWikiPageMetadata}
           askWiki={service.askWiki}

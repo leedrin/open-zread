@@ -26,6 +26,7 @@ fn main() {
             commands::restore_hub_wiki_history,
             commands::search_hub_wiki,
             commands::create_hub_wiki_page,
+            commands::create_hub_wiki_pages,
             commands::delete_hub_wiki_page,
             commands::update_hub_wiki_page_metadata,
             commands::merge_hub_wiki_text,

@@ -2,8 +2,8 @@ use crate::contracts::{
     CancelTaskResponse, HubCommandError, HubHealth, HubOpenZreadWiki, HubProject,
     HubProviderCapabilities, HubProviderContentHealth, HubProviderGeneratorHealth,
     HubProviderHealth, HubRunnerInfo, HubServiceHealth, HubSourceFile, HubTask, HubTaskEvent,
-    HubWikiAnswerReference, HubWikiAnswerResponse, HubWikiAsset, HubWikiChangeSet,
-    HubWikiHistoryEntry, HubWikiMergeResponse, HubWikiPageDraftResponse,
+    HubWikiAnswerReference, HubWikiAnswerResponse, HubWikiAsset, HubWikiBatchMutationResponse,
+    HubWikiChangeSet, HubWikiHistoryEntry, HubWikiMergeResponse, HubWikiPageDraftResponse,
     HubWikiPageMutationResponse, HubWikiSearchResponse, RegisterProjectResponse, TASK_EVENT,
 };
 use crate::mutations::ChangeSetCoordinator;
@@ -706,6 +706,38 @@ pub fn create_hub_wiki_page(
     )
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateHubWikiPageInput {
+    slug: String,
+    title: String,
+    section: String,
+    group: Option<String>,
+    content: String,
+    associated_files: Vec<String>,
+}
+
+#[tauri::command]
+pub fn create_hub_wiki_pages(
+    app: AppHandle,
+    project_id: String,
+    provider: String,
+    pages: Vec<CreateHubWikiPageInput>,
+) -> Result<HubWikiBatchMutationResponse, HubCommandError> {
+    let inputs = pages
+        .iter()
+        .map(|page| crate::page_ops::CreatePageInput {
+            slug: &page.slug,
+            title: &page.title,
+            section: &page.section,
+            group: page.group.as_deref(),
+            content: &page.content,
+            associated_files: &page.associated_files,
+        })
+        .collect::<Vec<_>>();
+    crate::page_ops::create_pages(&app, &project_id, &provider, &inputs)
+}
+
 #[tauri::command]
 pub fn delete_hub_wiki_page(
     app: AppHandle,
@@ -873,6 +905,17 @@ pub fn ask_hub_wiki(
             false,
         ));
     }
+    if question.len() > 20_000
+        || selected_text
+            .as_ref()
+            .is_some_and(|text| text.len() > 12_000)
+    {
+        return Err(command_error(
+            "invalid_request",
+            "The question or selected text exceeds the supported size.",
+            false,
+        ));
+    }
     let page = match provider.as_str() {
         "open_zread" => read_open_zread_wiki(&app, project_id)?,
         "zread" => read_zread_wiki(&app, project_id)?,
@@ -1003,6 +1046,13 @@ pub fn rewrite_hub_wiki_page(
             false,
         ));
     }
+    if instruction.len() > 12_000 {
+        return Err(command_error(
+            "invalid_request",
+            "The rewrite instruction exceeds the supported size.",
+            false,
+        ));
+    }
     let page = match provider.as_str() {
         "open_zread" => read_open_zread_wiki(&app, project_id)?,
         "zread" => read_zread_wiki(&app, project_id)?,
@@ -1123,6 +1173,13 @@ pub fn draft_hub_wiki_page(
         return Err(command_error(
             "invalid_request",
             "Project id and page topic are required.",
+            false,
+        ));
+    }
+    if topic.len() > 2_000 {
+        return Err(command_error(
+            "invalid_request",
+            "The page topic exceeds the supported size.",
             false,
         ));
     }

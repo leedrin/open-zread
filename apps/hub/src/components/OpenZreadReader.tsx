@@ -7,6 +7,7 @@ import type {
   HubWikiHistoryEntry,
   HubWikiDocument,
   HubWikiAnswerResponse,
+  HubWikiBatchMutationResponse,
   HubWikiPageDraftResponse,
   HubWikiPage,
   HubWikiPageMutationResponse,
@@ -34,14 +35,8 @@ interface OpenZreadReaderProps {
   applyChange: (changeSetId: string) => Promise<HubWikiChangeSet>;
   listHistory: (projectId: string, provider: HubWikiProvider) => Promise<HubWikiHistoryEntry[]>;
   restoreHistory: (projectId: string, provider: HubWikiProvider, historyId: string) => Promise<HubWikiHistoryEntry>;
-  createPage: (projectId: string, provider: HubWikiProvider, input: {
-    slug: string;
-    title: string;
-    section: string;
-    group?: string;
-    content: string;
-    associatedFiles: string[];
-  }) => Promise<HubWikiPageMutationResponse>;
+  createPage: (projectId: string, provider: HubWikiProvider, input: NewWikiPageInput) => Promise<HubWikiPageMutationResponse>;
+  createPages: (projectId: string, provider: HubWikiProvider, inputs: NewWikiPageInput[]) => Promise<HubWikiBatchMutationResponse>;
   deletePage: (projectId: string, provider: HubWikiProvider, slug: string) => Promise<HubWikiPageMutationResponse>;
   updatePageMetadata: (projectId: string, provider: HubWikiProvider, slug: string, input: {
     newSlug?: string;
@@ -73,6 +68,15 @@ interface OpenZreadReaderProps {
   onHistoryRestored: () => void;
   onClose: () => void;
 }
+
+type NewWikiPageInput = {
+  slug: string;
+  title: string;
+  section: string;
+  group?: string;
+  content: string;
+  associatedFiles: string[];
+};
 
 type MarkdownBlock =
   | { type: 'heading'; level: number; text: string }
@@ -308,6 +312,7 @@ export function OpenZreadReader({
   listHistory,
   restoreHistory,
   createPage,
+  createPages,
   deletePage,
   updatePageMetadata,
   askWiki,
@@ -342,9 +347,11 @@ export function OpenZreadReader({
   const [newPageSlug, setNewPageSlug] = useState('');
   const [newPageTitle, setNewPageTitle] = useState('');
   const [newPageSection, setNewPageSection] = useState('General');
+  const [newPageGroup, setNewPageGroup] = useState('');
   const [newPageContent, setNewPageContent] = useState('');
   const [newPageAssociatedFiles, setNewPageAssociatedFiles] = useState('');
   const [newPageTopic, setNewPageTopic] = useState('');
+  const [queuedNewPages, setQueuedNewPages] = useState<NewWikiPageInput[]>([]);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [metadataSlug, setMetadataSlug] = useState('');
   const [metadataTitle, setMetadataTitle] = useState('');
@@ -525,25 +532,66 @@ export function OpenZreadReader({
     setNewPageSlug('');
     setNewPageTitle('');
     setNewPageSection(sections[0]?.[0] ?? 'General');
+    setNewPageGroup('');
     setNewPageContent('');
     setNewPageAssociatedFiles('');
     setNewPageTopic('');
+    setQueuedNewPages([]);
     setPageMutationError(null);
     setNewPageOpen(true);
   };
 
+  const currentNewPageInput = (): NewWikiPageInput => ({
+    slug: newPageSlug,
+    title: newPageTitle,
+    section: newPageSection,
+    ...(newPageGroup.trim() ? { group: newPageGroup } : {}),
+    content: newPageContent,
+    associatedFiles: newPageAssociatedFiles.split(/[,\n]/).map((path) => path.trim()).filter(Boolean),
+  });
+
+  const resetNewPageFields = () => {
+    setNewPageSlug('');
+    setNewPageTitle('');
+    setNewPageGroup('');
+    setNewPageContent('');
+    setNewPageAssociatedFiles('');
+    setNewPageTopic('');
+  };
+
+  const queueNewPage = () => {
+    const input = currentNewPageInput();
+    if (!input.slug.trim() || !input.title.trim() || !input.section.trim()) {
+      setPageMutationError('Slug, title, and section are required before adding a page to the batch.');
+      return;
+    }
+    setQueuedNewPages((current) => [...current, input]);
+    resetNewPageFields();
+    setPageMutationError(null);
+  };
+
   const createNewPage = async () => {
+    const hasCurrentPage = Boolean(newPageSlug.trim() || newPageTitle.trim() || newPageContent.trim() || newPageAssociatedFiles.trim());
+    const currentPage = hasCurrentPage ? currentNewPageInput() : null;
+    if (currentPage && (!currentPage.slug.trim() || !currentPage.title.trim() || !currentPage.section.trim())) {
+      setPageMutationError('Slug, title, and section are required for the current page.');
+      return;
+    }
+    if (!currentPage && queuedNewPages.length === 0) {
+      setPageMutationError('Add at least one Wiki page before applying the change.');
+      return;
+    }
+    const pages = currentPage ? [...queuedNewPages, currentPage] : queuedNewPages;
     setPageMutationBusy(true);
     setPageMutationError(null);
     try {
-      await createPage(project.id, wiki.provider, {
-        slug: newPageSlug,
-        title: newPageTitle,
-        section: newPageSection,
-        content: newPageContent,
-        associatedFiles: newPageAssociatedFiles.split(/[,\n]/).map((path) => path.trim()).filter(Boolean),
-      });
+      if (pages.length === 1) {
+        await createPage(project.id, wiki.provider, pages[0]);
+      } else {
+        await createPages(project.id, wiki.provider, pages);
+      }
       setNewPageOpen(false);
+      setQueuedNewPages([]);
       onHistoryRestored();
     } catch (error) {
       setPageMutationError(error instanceof Error ? error.message : 'Unable to create the Wiki page.');
@@ -678,6 +726,7 @@ export function OpenZreadReader({
   const displayPage = selectedPage && editedContent[selectedPage.slug] !== undefined
     ? { ...selectedPage, content: editedContent[selectedPage.slug] }
     : selectedPage;
+  const hasCurrentNewPage = Boolean(newPageSlug.trim() || newPageTitle.trim() || newPageContent.trim() || newPageAssociatedFiles.trim());
 
   return (
     <section
@@ -732,6 +781,7 @@ export function OpenZreadReader({
           <div>
             <p className="eyebrow">READ-ONLY CONTEXT</p>
             <h3>Ask about {selectedPage.title}</h3>
+            <small className="wiki-privacy-note">The question and current page context are sent to your configured model provider. Nothing is written to the Wiki.</small>
           </div>
           <form onSubmit={(event) => { event.preventDefault(); void askCurrentPage(); }}>
             <textarea
@@ -774,12 +824,27 @@ export function OpenZreadReader({
             <label>Slug<input data-testid="new-wiki-page-slug" value={newPageSlug} onChange={(event) => setNewPageSlug(event.target.value)} /></label>
             <label>Title<input data-testid="new-wiki-page-title" value={newPageTitle} onChange={(event) => setNewPageTitle(event.target.value)} /></label>
             <label>Section<input data-testid="new-wiki-page-section" value={newPageSection} onChange={(event) => setNewPageSection(event.target.value)} /></label>
+            <label>Group (optional)<input data-testid="new-wiki-page-group" value={newPageGroup} onChange={(event) => setNewPageGroup(event.target.value)} /></label>
             <label>Associated source paths<input value={newPageAssociatedFiles} placeholder="src/main.ts, src/app.tsx" onChange={(event) => setNewPageAssociatedFiles(event.target.value)} /></label>
           </div>
+          {queuedNewPages.length > 0 && (
+            <div className="wiki-batch-pages" data-testid="queued-wiki-pages">
+              <p className="eyebrow">PENDING BATCH · {queuedNewPages.length} PAGE(S)</p>
+              {queuedNewPages.map((page, index) => (
+                <div className="wiki-batch-page" key={`${page.slug}-${index}`}>
+                  <span><strong>{page.title}</strong><small>{page.section} · {page.slug}</small></span>
+                  <button type="button" className="secondary-button" disabled={pageMutationBusy} onClick={() => setQueuedNewPages((current) => current.filter((_, pageIndex) => pageIndex !== index))}>Remove</button>
+                </div>
+              ))}
+            </div>
+          )}
           <label>Markdown content<textarea data-testid="new-wiki-page-content" value={newPageContent} onChange={(event) => setNewPageContent(event.target.value)} /></label>
           <div className="wiki-editor-actions">
+            <button type="button" className="secondary-button" data-testid="queue-wiki-page" disabled={pageMutationBusy} onClick={queueNewPage}>
+              Add page to batch
+            </button>
             <button type="submit" className="primary-button" data-testid="create-wiki-page" disabled={pageMutationBusy}>
-              {pageMutationBusy ? 'Creating…' : 'Create and write file'}
+              {pageMutationBusy ? 'Applying…' : queuedNewPages.length > 0 ? `Create ${queuedNewPages.length + (hasCurrentNewPage ? 1 : 0)} pages and write files` : 'Create and write file'}
             </button>
           </div>
           {pageMutationError && <p className="wiki-reader-page-error" role="alert">{pageMutationError}</p>}
