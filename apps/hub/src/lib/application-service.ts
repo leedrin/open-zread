@@ -30,6 +30,7 @@ import {
   type HubWikiChangeSet,
   type HubWikiHistoryEntry,
   type HubWikiSearchResponse,
+  type HubWikiPageMutationResponse,
   type RegisterProjectResponse,
 } from '@open-zread/hub-contract';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
@@ -43,6 +44,23 @@ export interface HubEvent<T> {
 
 export type HubEventListener<T> = (event: HubEvent<T>) => void;
 export type Unsubscribe = () => void;
+
+export interface CreateWikiPageInput {
+  slug: string;
+  title: string;
+  section: string;
+  group?: string;
+  content: string;
+  associatedFiles: string[];
+}
+
+export interface UpdateWikiPageMetadataInput {
+  newSlug?: string;
+  title?: string;
+  section?: string;
+  group?: string;
+  associatedFiles?: string[];
+}
 
 /** The transport is the only place the application service knows about Tauri. */
 export interface HubTransport {
@@ -78,6 +96,14 @@ export interface HubApplicationService {
   listWikiHistory(projectId: string, provider: HubWikiProvider): Promise<HubWikiHistoryEntry[]>;
   restoreWikiHistory(projectId: string, provider: HubWikiProvider, historyId: string): Promise<HubWikiHistoryEntry>;
   searchWiki(query: string): Promise<HubWikiSearchResponse>;
+  createWikiPage(projectId: string, provider: HubWikiProvider, input: CreateWikiPageInput): Promise<HubWikiPageMutationResponse>;
+  deleteWikiPage(projectId: string, provider: HubWikiProvider, slug: string): Promise<HubWikiPageMutationResponse>;
+  updateWikiPageMetadata(
+    projectId: string,
+    provider: HubWikiProvider,
+    slug: string,
+    input: UpdateWikiPageMetadataInput,
+  ): Promise<HubWikiPageMutationResponse>;
   cancelTask(taskId: string): Promise<CancelTaskResponse>;
   subscribeToTaskEvents(listener: (event: HubTaskEvent) => void): Promise<Unsubscribe>;
 }
@@ -610,6 +636,22 @@ function parseSearchResponse(value: unknown): HubWikiSearchResponse {
   return { query: value.query, results, failures };
 }
 
+function parseWikiPageMutationResponse(value: unknown): HubWikiPageMutationResponse {
+  if (!isRecord(value) || (value.provider !== 'open_zread' && value.provider !== 'zread')) {
+    throw new HubProtocolError('Invalid Hub response: Wiki page mutation provider is unsupported.');
+  }
+  if (value.action !== 'created' && value.action !== 'deleted' && value.action !== 'updated') {
+    throw new HubProtocolError('Invalid Hub response: Wiki page mutation action is unsupported.');
+  }
+  return {
+    projectId: requiredString(value.projectId, 'pageMutation.projectId'),
+    provider: value.provider,
+    slug: requiredString(value.slug, 'pageMutation.slug'),
+    action: value.action,
+    relativePath: requiredString(value.relativePath, 'pageMutation.relativePath'),
+  };
+}
+
 /**
  * Create the typed client used by React and future Tauri command adapters.
  * React never receives a filesystem or process capability from this boundary.
@@ -890,6 +932,72 @@ export function createHubApplicationService(
         return invalidRequest('Search query is required.');
       }
       return transport.invoke(HUB_COMMANDS.searchWiki, { query: normalizedQuery }).then(parseSearchResponse);
+    },
+
+    createWikiPage(projectId, provider, input) {
+      const normalizedId = projectId.trim();
+      const normalizedSlug = input.slug.trim();
+      const normalizedTitle = input.title.trim();
+      const normalizedSection = input.section.trim();
+      if (!normalizedId || !normalizedSlug || !normalizedTitle || !normalizedSection) {
+        return invalidRequest('Project id, page slug, title, and section are required.');
+      }
+      if (provider !== 'open_zread' && provider !== 'zread') {
+        return invalidRequest('Wiki provider is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.createWikiPage, {
+        projectId: normalizedId,
+        provider,
+        slug: normalizedSlug,
+        title: normalizedTitle,
+        section: normalizedSection,
+        ...(input.group?.trim() ? { group: input.group.trim() } : {}),
+        content: input.content,
+        associatedFiles: input.associatedFiles,
+      }).then(parseWikiPageMutationResponse);
+    },
+
+    deleteWikiPage(projectId, provider, slug) {
+      const normalizedId = projectId.trim();
+      const normalizedSlug = slug.trim();
+      if (!normalizedId || !normalizedSlug) {
+        return invalidRequest('Project id and page slug are required.');
+      }
+      if (provider !== 'open_zread' && provider !== 'zread') {
+        return invalidRequest('Wiki provider is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.deleteWikiPage, {
+        projectId: normalizedId,
+        provider,
+        slug: normalizedSlug,
+      }).then(parseWikiPageMutationResponse);
+    },
+
+    updateWikiPageMetadata(projectId, provider, slug, input) {
+      const normalizedId = projectId.trim();
+      const normalizedSlug = slug.trim();
+      if (!normalizedId || !normalizedSlug) {
+        return invalidRequest('Project id and page slug are required.');
+      }
+      if (provider !== 'open_zread' && provider !== 'zread') {
+        return invalidRequest('Wiki provider is required.');
+      }
+      const normalizedInput = {
+        ...(input.newSlug?.trim() ? { newSlug: input.newSlug.trim() } : {}),
+        ...(input.title?.trim() ? { title: input.title.trim() } : {}),
+        ...(input.section?.trim() ? { section: input.section.trim() } : {}),
+        ...(input.group?.trim() ? { group: input.group.trim() } : {}),
+        ...(input.associatedFiles !== undefined ? { associatedFiles: input.associatedFiles } : {}),
+      };
+      if (Object.keys(normalizedInput).length === 0) {
+        return invalidRequest('At least one page metadata field is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.updateWikiPageMetadata, {
+        projectId: normalizedId,
+        provider,
+        slug: normalizedSlug,
+        ...normalizedInput,
+      }).then(parseWikiPageMutationResponse);
     },
 
     cancelTask(taskId) {

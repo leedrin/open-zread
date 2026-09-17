@@ -916,6 +916,9 @@ export function HubApp({ service = defaultService }: HubAppProps) {
           applyChange={service.applyWikiChange}
           listHistory={service.listWikiHistory}
           restoreHistory={service.restoreWikiHistory}
+          createPage={service.createWikiPage}
+          deletePage={service.deleteWikiPage}
+          updatePageMetadata={service.updateWikiPageMetadata}
           onHistoryRestored={() => void openWikiReader(readerState.project, readerState.wiki.provider)}
           onClose={() => setReaderState({ status: 'closed' })}
         />

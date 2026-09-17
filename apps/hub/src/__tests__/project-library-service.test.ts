@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import type { HubProject, HubTask, HubWikiChangeSet, HubWikiHistoryEntry, HubWikiSearchResponse } from '@open-zread/hub-contract';
+import type {
+  HubProject,
+  HubTask,
+  HubWikiChangeSet,
+  HubWikiHistoryEntry,
+  HubWikiPageMutationResponse,
+  HubWikiSearchResponse,
+} from '@open-zread/hub-contract';
 import {
   createHubApplicationService,
   type HubTransport,
@@ -71,6 +78,14 @@ const searchResponse: HubWikiSearchResponse = {
     path: 'Core/overview.md',
   }],
   failures: [],
+};
+
+const pageMutation: HubWikiPageMutationResponse = {
+  projectId: project.id,
+  provider: 'open_zread',
+  slug: 'provider-collaboration',
+  action: 'created',
+  relativePath: 'Architecture/provider-collaboration.md',
 };
 
 function createTransport(
@@ -159,6 +174,9 @@ describe('Project Library application-service interface', () => {
       list_hub_wiki_history: [historyEntry],
       restore_hub_wiki_history: historyEntry,
       search_hub_wiki: searchResponse,
+      create_hub_wiki_page: pageMutation,
+      delete_hub_wiki_page: { ...pageMutation, action: 'deleted' },
+      update_hub_wiki_page_metadata: { ...pageMutation, action: 'updated' },
     }, [], calls));
 
     await expect(service.startOpenZreadTask(project.id, 'generate')).resolves.toEqual(task);
@@ -168,6 +186,20 @@ describe('Project Library application-service interface', () => {
     await expect(service.listWikiHistory(project.id, 'open_zread')).resolves.toEqual([historyEntry]);
     await expect(service.restoreWikiHistory(project.id, 'open_zread', historyEntry.id)).resolves.toEqual(historyEntry);
     await expect(service.searchWiki(' 协同 ')).resolves.toEqual(searchResponse);
+    await expect(service.createWikiPage(project.id, 'open_zread', {
+      slug: ' provider-collaboration ',
+      title: 'Provider Collaboration',
+      section: 'Architecture',
+      group: 'Core',
+      content: '# Collaboration',
+      associatedFiles: ['src/provider.ts'],
+    })).resolves.toEqual(pageMutation);
+    await expect(service.deleteWikiPage(project.id, 'open_zread', ' provider-collaboration ')).resolves.toMatchObject({ action: 'deleted' });
+    await expect(service.updateWikiPageMetadata(project.id, 'open_zread', 'provider-collaboration', {
+      newSlug: 'provider-collaboration-v2',
+      title: 'Provider Collaboration v2',
+      section: 'Architecture',
+    })).resolves.toMatchObject({ action: 'updated' });
     expect(calls).toEqual([
       { command: 'start_hub_open_zread_task', args: { projectId: project.id, operation: 'generate' } },
       { command: 'start_hub_zread_task', args: { projectId: project.id } },
@@ -182,6 +214,34 @@ describe('Project Library application-service interface', () => {
         args: { projectId: project.id, provider: 'open_zread', historyId: historyEntry.id },
       },
       { command: 'search_hub_wiki', args: { query: '协同' } },
+      {
+        command: 'create_hub_wiki_page',
+        args: {
+          projectId: project.id,
+          provider: 'open_zread',
+          slug: 'provider-collaboration',
+          title: 'Provider Collaboration',
+          section: 'Architecture',
+          group: 'Core',
+          content: '# Collaboration',
+          associatedFiles: ['src/provider.ts'],
+        },
+      },
+      {
+        command: 'delete_hub_wiki_page',
+        args: { projectId: project.id, provider: 'open_zread', slug: 'provider-collaboration' },
+      },
+      {
+        command: 'update_hub_wiki_page_metadata',
+        args: {
+          projectId: project.id,
+          provider: 'open_zread',
+          slug: 'provider-collaboration',
+          newSlug: 'provider-collaboration-v2',
+          title: 'Provider Collaboration v2',
+          section: 'Architecture',
+        },
+      },
     ]);
   });
 
@@ -191,6 +251,10 @@ describe('Project Library application-service interface', () => {
 
     await expect(service.startOpenZreadTask('  ', 'generate')).rejects.toMatchObject({ code: 'invalid_request' });
     await expect(service.startOpenZreadTask(project.id, 'unsupported' as 'generate')).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(service.createWikiPage(project.id, 'open_zread', {
+      slug: ' ', title: 'Title', section: 'Section', content: '', associatedFiles: [],
+    })).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(service.updateWikiPageMetadata(project.id, 'open_zread', 'overview', {})).rejects.toMatchObject({ code: 'invalid_request' });
     expect(calls).toEqual([]);
   });
 });

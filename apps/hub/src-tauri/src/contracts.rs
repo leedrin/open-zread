@@ -268,6 +268,16 @@ pub struct HubWikiSearchResponse {
     pub failures: Vec<HubWikiSearchFailure>,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiPageMutationResponse {
+    pub project_id: String,
+    pub provider: &'static str,
+    pub slug: String,
+    pub action: &'static str,
+    pub relative_path: String,
+}
+
 pub const TASK_EVENT: &str = "hub://task-event";
 
 #[cfg(test)]

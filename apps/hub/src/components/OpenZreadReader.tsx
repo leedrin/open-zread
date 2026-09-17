@@ -7,6 +7,7 @@ import type {
   HubWikiHistoryEntry,
   HubWikiDocument,
   HubWikiPage,
+  HubWikiPageMutationResponse,
   HubWikiProvider,
 } from '@open-zread/hub-contract';
 
@@ -31,6 +32,22 @@ interface OpenZreadReaderProps {
   applyChange: (changeSetId: string) => Promise<HubWikiChangeSet>;
   listHistory: (projectId: string, provider: HubWikiProvider) => Promise<HubWikiHistoryEntry[]>;
   restoreHistory: (projectId: string, provider: HubWikiProvider, historyId: string) => Promise<HubWikiHistoryEntry>;
+  createPage: (projectId: string, provider: HubWikiProvider, input: {
+    slug: string;
+    title: string;
+    section: string;
+    group?: string;
+    content: string;
+    associatedFiles: string[];
+  }) => Promise<HubWikiPageMutationResponse>;
+  deletePage: (projectId: string, provider: HubWikiProvider, slug: string) => Promise<HubWikiPageMutationResponse>;
+  updatePageMetadata: (projectId: string, provider: HubWikiProvider, slug: string, input: {
+    newSlug?: string;
+    title?: string;
+    section?: string;
+    group?: string;
+    associatedFiles?: string[];
+  }) => Promise<HubWikiPageMutationResponse>;
   onHistoryRestored: () => void;
   onClose: () => void;
 }
@@ -268,6 +285,9 @@ export function OpenZreadReader({
   applyChange,
   listHistory,
   restoreHistory,
+  createPage,
+  deletePage,
+  updatePageMetadata,
   onHistoryRestored,
   onClose,
 }: OpenZreadReaderProps) {
@@ -293,6 +313,18 @@ export function OpenZreadReader({
   const [historyEntries, setHistoryEntries] = useState<HubWikiHistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [newPageOpen, setNewPageOpen] = useState(false);
+  const [newPageSlug, setNewPageSlug] = useState('');
+  const [newPageTitle, setNewPageTitle] = useState('');
+  const [newPageSection, setNewPageSection] = useState('General');
+  const [newPageContent, setNewPageContent] = useState('');
+  const [newPageAssociatedFiles, setNewPageAssociatedFiles] = useState('');
+  const [metadataOpen, setMetadataOpen] = useState(false);
+  const [metadataSlug, setMetadataSlug] = useState('');
+  const [metadataTitle, setMetadataTitle] = useState('');
+  const [metadataSection, setMetadataSection] = useState('');
+  const [pageMutationBusy, setPageMutationBusy] = useState(false);
+  const [pageMutationError, setPageMutationError] = useState<string | null>(null);
   const articleRef = useRef<HTMLElement | null>(null);
   const selectedPage = wiki.pages.find((page) => page.slug === selectedSlug) ?? wiki.pages[0];
   const sections = useMemo(() => {
@@ -322,6 +354,9 @@ export function OpenZreadReader({
     setHistoryOpen(false);
     setHistoryEntries([]);
     setHistoryError(null);
+    setNewPageOpen(false);
+    setMetadataOpen(false);
+    setPageMutationError(null);
   }, [wiki.provider, wiki.currentPointer, wiki.versionId]);
 
   useEffect(() => {
@@ -445,6 +480,84 @@ export function OpenZreadReader({
     }
   };
 
+  const startNewPage = () => {
+    setNewPageSlug('');
+    setNewPageTitle('');
+    setNewPageSection(sections[0]?.[0] ?? 'General');
+    setNewPageContent('');
+    setNewPageAssociatedFiles('');
+    setPageMutationError(null);
+    setNewPageOpen(true);
+  };
+
+  const createNewPage = async () => {
+    setPageMutationBusy(true);
+    setPageMutationError(null);
+    try {
+      await createPage(project.id, wiki.provider, {
+        slug: newPageSlug,
+        title: newPageTitle,
+        section: newPageSection,
+        content: newPageContent,
+        associatedFiles: newPageAssociatedFiles.split(/[,\n]/).map((path) => path.trim()).filter(Boolean),
+      });
+      setNewPageOpen(false);
+      onHistoryRestored();
+    } catch (error) {
+      setPageMutationError(error instanceof Error ? error.message : 'Unable to create the Wiki page.');
+    } finally {
+      setPageMutationBusy(false);
+    }
+  };
+
+  const startMetadataEdit = () => {
+    if (!selectedPage) {
+      return;
+    }
+    setMetadataSlug(selectedPage.slug);
+    setMetadataTitle(selectedPage.title);
+    setMetadataSection(selectedPage.section);
+    setPageMutationError(null);
+    setMetadataOpen(true);
+  };
+
+  const saveMetadata = async () => {
+    if (!selectedPage) {
+      return;
+    }
+    setPageMutationBusy(true);
+    setPageMutationError(null);
+    try {
+      await updatePageMetadata(project.id, wiki.provider, selectedPage.slug, {
+        newSlug: metadataSlug,
+        title: metadataTitle,
+        section: metadataSection,
+      });
+      setMetadataOpen(false);
+      onHistoryRestored();
+    } catch (error) {
+      setPageMutationError(error instanceof Error ? error.message : 'Unable to update the Wiki page metadata.');
+    } finally {
+      setPageMutationBusy(false);
+    }
+  };
+
+  const removeSelectedPage = async () => {
+    if (!selectedPage || !globalThis.confirm(`Delete ${selectedPage.title}? The original Markdown file will be removed.`)) {
+      return;
+    }
+    setPageMutationBusy(true);
+    setPageMutationError(null);
+    try {
+      await deletePage(project.id, wiki.provider, selectedPage.slug);
+      onHistoryRestored();
+    } catch (error) {
+      setPageMutationError(error instanceof Error ? error.message : 'Unable to delete the Wiki page.');
+    } finally {
+      setPageMutationBusy(false);
+    }
+  };
+
   const displayPage = selectedPage && editedContent[selectedPage.slug] !== undefined
     ? { ...selectedPage, content: editedContent[selectedPage.slug] }
     : selectedPage;
@@ -487,10 +600,41 @@ export function OpenZreadReader({
         </div>
       )}
       <div className="wiki-reader-history-bar">
+        <button type="button" className="primary-button" data-testid="new-wiki-page" onClick={startNewPage}>
+          New page
+        </button>
         <button type="button" className="secondary-button" data-testid="open-wiki-history" onClick={() => void openHistory()}>
           {historyOpen ? 'Hide history' : 'History & restore'}
         </button>
       </div>
+      {newPageOpen && (
+        <form
+          className="wiki-structure-form"
+          data-testid="new-wiki-page-form"
+          onSubmit={(event) => { event.preventDefault(); void createNewPage(); }}
+        >
+          <div className="wiki-structure-form-heading">
+            <div>
+              <p className="eyebrow">STRUCTURE CHANGE</p>
+              <h3>Create Wiki page</h3>
+            </div>
+            <button type="button" className="secondary-button" onClick={() => setNewPageOpen(false)}>Cancel</button>
+          </div>
+          <div className="wiki-structure-form-grid">
+            <label>Slug<input data-testid="new-wiki-page-slug" value={newPageSlug} onChange={(event) => setNewPageSlug(event.target.value)} /></label>
+            <label>Title<input data-testid="new-wiki-page-title" value={newPageTitle} onChange={(event) => setNewPageTitle(event.target.value)} /></label>
+            <label>Section<input data-testid="new-wiki-page-section" value={newPageSection} onChange={(event) => setNewPageSection(event.target.value)} /></label>
+            <label>Associated source paths<input value={newPageAssociatedFiles} placeholder="src/main.ts, src/app.tsx" onChange={(event) => setNewPageAssociatedFiles(event.target.value)} /></label>
+          </div>
+          <label>Markdown content<textarea data-testid="new-wiki-page-content" value={newPageContent} onChange={(event) => setNewPageContent(event.target.value)} /></label>
+          <div className="wiki-editor-actions">
+            <button type="submit" className="primary-button" data-testid="create-wiki-page" disabled={pageMutationBusy}>
+              {pageMutationBusy ? 'Creating…' : 'Create and write file'}
+            </button>
+          </div>
+          {pageMutationError && <p className="wiki-reader-page-error" role="alert">{pageMutationError}</p>}
+        </form>
+      )}
       {historyOpen && (
         <section className="wiki-history" data-testid="wiki-history" aria-label="Wiki history">
           {historyLoading && <p>Loading history…</p>}
@@ -568,9 +712,38 @@ export function OpenZreadReader({
                       Edit page
                     </button>
                   )}
+                  {!editing && (
+                    <button type="button" className="secondary-button" data-testid={`edit-wiki-metadata-${selectedPage.slug}`} onClick={startMetadataEdit}>
+                      Metadata
+                    </button>
+                  )}
+                  {!editing && (
+                    <button type="button" className="danger-button" data-testid={`delete-wiki-page-${selectedPage.slug}`} disabled={pageMutationBusy} onClick={() => void removeSelectedPage()}>
+                      Delete
+                    </button>
+                  )}
                 </div>
               </div>
-              {editing && displayPage ? (
+              {metadataOpen ? (
+                <form
+                  className="wiki-structure-form wiki-metadata-form"
+                  data-testid="wiki-metadata-form"
+                  onSubmit={(event) => { event.preventDefault(); void saveMetadata(); }}
+                >
+                  <div className="wiki-structure-form-grid">
+                    <label>Slug<input data-testid="wiki-metadata-slug" value={metadataSlug} onChange={(event) => setMetadataSlug(event.target.value)} /></label>
+                    <label>Title<input data-testid="wiki-metadata-title" value={metadataTitle} onChange={(event) => setMetadataTitle(event.target.value)} /></label>
+                    <label>Section<input data-testid="wiki-metadata-section" value={metadataSection} onChange={(event) => setMetadataSection(event.target.value)} /></label>
+                  </div>
+                  <div className="wiki-editor-actions">
+                    <button type="button" className="secondary-button" disabled={pageMutationBusy} onClick={() => setMetadataOpen(false)}>Cancel</button>
+                    <button type="submit" className="primary-button" data-testid="save-wiki-metadata" disabled={pageMutationBusy}>
+                      {pageMutationBusy ? 'Saving…' : 'Save metadata'}
+                    </button>
+                  </div>
+                  {pageMutationError && <p className="wiki-reader-page-error" role="alert">{pageMutationError}</p>}
+                </form>
+              ) : editing && displayPage ? (
                 <div className="wiki-editor" data-testid="wiki-editor">
                   <label htmlFor="wiki-editor-content">Markdown content</label>
                   <textarea

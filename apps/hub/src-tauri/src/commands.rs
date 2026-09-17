@@ -2,8 +2,8 @@ use crate::contracts::{
     CancelTaskResponse, HubCommandError, HubHealth, HubOpenZreadWiki, HubProject,
     HubProviderCapabilities, HubProviderContentHealth, HubProviderGeneratorHealth,
     HubProviderHealth, HubRunnerInfo, HubServiceHealth, HubSourceFile, HubTask, HubTaskEvent,
-    HubWikiAsset, HubWikiChangeSet, HubWikiHistoryEntry, HubWikiSearchResponse,
-    RegisterProjectResponse, TASK_EVENT,
+    HubWikiAsset, HubWikiChangeSet, HubWikiHistoryEntry, HubWikiPageMutationResponse,
+    HubWikiSearchResponse, RegisterProjectResponse, TASK_EVENT,
 };
 use crate::mutations::ChangeSetCoordinator;
 use crate::projects::{
@@ -664,6 +664,68 @@ pub fn search_hub_wiki(
     query: String,
 ) -> Result<HubWikiSearchResponse, HubCommandError> {
     crate::search::search_wiki(&app, &query)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn create_hub_wiki_page(
+    app: AppHandle,
+    project_id: String,
+    provider: String,
+    slug: String,
+    title: String,
+    section: String,
+    group: Option<String>,
+    content: String,
+    associated_files: Vec<String>,
+) -> Result<HubWikiPageMutationResponse, HubCommandError> {
+    crate::page_ops::create_page(
+        &app,
+        &project_id,
+        &provider,
+        &slug,
+        &title,
+        &section,
+        group.as_deref(),
+        &content,
+        &associated_files,
+    )
+}
+
+#[tauri::command]
+pub fn delete_hub_wiki_page(
+    app: AppHandle,
+    project_id: String,
+    provider: String,
+    slug: String,
+) -> Result<HubWikiPageMutationResponse, HubCommandError> {
+    crate::page_ops::delete_page(&app, &project_id, &provider, &slug)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn update_hub_wiki_page_metadata(
+    app: AppHandle,
+    project_id: String,
+    provider: String,
+    slug: String,
+    new_slug: Option<String>,
+    title: Option<String>,
+    section: Option<String>,
+    group: Option<String>,
+    associated_files: Option<Vec<String>>,
+) -> Result<HubWikiPageMutationResponse, HubCommandError> {
+    crate::page_ops::update_metadata(
+        &app,
+        &project_id,
+        &provider,
+        &slug,
+        new_slug.as_deref(),
+        title.as_deref(),
+        section.as_deref(),
+        group.as_deref(),
+        associated_files.as_deref(),
+    )
 }
 
 #[tauri::command]

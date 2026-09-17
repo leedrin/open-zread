@@ -15,6 +15,9 @@ export const HUB_COMMANDS = {
   listWikiHistory: 'list_hub_wiki_history',
   restoreWikiHistory: 'restore_hub_wiki_history',
   searchWiki: 'search_hub_wiki',
+  createWikiPage: 'create_hub_wiki_page',
+  deleteWikiPage: 'delete_hub_wiki_page',
+  updateWikiPageMetadata: 'update_hub_wiki_page_metadata',
   cancelTask: 'cancel_hub_task',
   listProjects: 'list_hub_projects',
   registerProject: 'register_hub_project',
@@ -249,6 +252,16 @@ export interface HubWikiSearchResponse {
   query: string;
   results: HubWikiSearchResult[];
   failures: Array<{ projectId: string; projectName: string; provider: HubWikiProvider; message: string }>;
+}
+
+export type HubWikiPageMutationAction = 'created' | 'deleted' | 'updated';
+
+export interface HubWikiPageMutationResponse {
+  projectId: string;
+  provider: HubWikiProvider;
+  slug: string;
+  action: HubWikiPageMutationAction;
+  relativePath: string;
 }
 
 export const HUB_TASK_KINDS = ['generation', 'update', 'maintenance'] as const;
