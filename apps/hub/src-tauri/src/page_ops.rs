@@ -408,6 +408,7 @@ fn create_page_impl(
     group: Option<&str>,
     content: &str,
     associated_files: &[String],
+    record_history: bool,
 ) -> Result<HubWikiPageMutationResponse, HubCommandError> {
     if !valid_component(slug) || title.trim().is_empty() || !valid_component(section) {
         return Err(error(
@@ -495,7 +496,7 @@ fn create_page_impl(
         }
         return Err(write_error);
     }
-    if location.provider == "open_zread" {
+    if record_history && location.provider == "open_zread" {
         let _ = record_open_zread_structure_snapshot(
             &root,
             &Uuid::new_v4().to_string(),
@@ -538,6 +539,7 @@ pub(crate) fn create_page(
         group,
         content,
         associated_files,
+        true,
     )
 }
 
@@ -591,6 +593,7 @@ pub(crate) fn create_pages(
             page.group,
             page.content,
             page.associated_files,
+            false,
         ) {
             Ok(mutation) => mutations.push(mutation),
             Err(batch_error) => {
@@ -605,6 +608,18 @@ pub(crate) fn create_pages(
                 return Err(batch_error);
             }
         }
+    }
+    if location.provider == "open_zread" {
+        let history_entries = mutations
+            .iter()
+            .map(|mutation| (mutation.relative_path.clone(), None))
+            .collect::<Vec<_>>();
+        let _ = record_open_zread_structure_snapshot(
+            &root,
+            &Uuid::new_v4().to_string(),
+            &original_catalog,
+            &history_entries,
+        );
     }
     Ok(HubWikiBatchMutationResponse {
         project_id: project_id.to_string(),
