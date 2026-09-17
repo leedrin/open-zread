@@ -3,6 +3,8 @@ import type {
   HubHealth,
   HubProject,
   HubProviderHealth,
+  HubOpenZreadOperation,
+  HubTask,
   HubTaskEvent,
   HubWikiDocument,
   HubWikiProvider,
@@ -63,6 +65,15 @@ function formatLastOpened(lastOpenedAt?: string): string {
   return new Date(timestamp).toLocaleString();
 }
 
+function formatElapsed(startedAt: string, now: number): string {
+  const started = Number(startedAt);
+  if (!Number.isFinite(started)) {
+    return '—';
+  }
+  const seconds = Math.max(0, Math.floor((now - started) / 1000));
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
+}
+
 function availableWikiProviders(project: HubProject): HubWikiProvider[] {
   return (['open_zread', 'zread'] as const).filter((provider) => {
     const status = provider === 'open_zread' ? project.wiki.openZread : project.wiki.zread;
@@ -111,6 +122,10 @@ export function HubApp({ service = defaultService }: HubAppProps) {
   const [readerState, setReaderState] = useState<ReaderState>({ status: 'closed' });
   const [readerSessions, setReaderSessions] = useState<Record<string, WikiReaderSession>>({});
   const [lastTaskEvent, setLastTaskEvent] = useState<HubTaskEvent | null>(null);
+  const [activeTask, setActiveTask] = useState<HubTask | null>(null);
+  const [activeTaskEvent, setActiveTaskEvent] = useState<HubTaskEvent | null>(null);
+  const [taskMessage, setTaskMessage] = useState<string | null>(null);
+  const [taskClock, setTaskClock] = useState(() => Date.now());
   const mountedRef = useRef(true);
 
   const loadHealth = useCallback(async () => {
@@ -301,6 +316,41 @@ export function HubApp({ service = defaultService }: HubAppProps) {
     }
   }, [service]);
 
+  const startOpenZreadTask = useCallback(async (project: HubProject, operation: HubOpenZreadOperation) => {
+    if (activeTask) {
+      return;
+    }
+    setTaskMessage(null);
+    setActiveTaskEvent(null);
+    try {
+      const task = await service.startOpenZreadTask(project.id, operation);
+      if (mountedRef.current) {
+        setActiveTask(task);
+        setTaskMessage(`${operation === 'generate' ? 'Generation' : 'Sync'} started for ${project.name}.`);
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setTaskMessage(errorMessage(error));
+      }
+    }
+  }, [activeTask, service]);
+
+  const cancelActiveTask = useCallback(async () => {
+    if (!activeTask) {
+      return;
+    }
+    try {
+      await service.cancelTask(activeTask.taskId);
+      if (mountedRef.current) {
+        setTaskMessage('Cancellation requested. The previous readable Wiki will be kept if generation does not complete.');
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setTaskMessage(errorMessage(error));
+      }
+    }
+  }, [activeTask, service]);
+
   const updateReaderSession = useCallback((projectId: string, provider: HubWikiProvider, session: WikiReaderSession) => {
     setReaderSessions((current) => ({
       ...current,
@@ -368,6 +418,9 @@ export function HubApp({ service = defaultService }: HubAppProps) {
     void service.subscribeToTaskEvents((event) => {
       if (!disposed) {
         setLastTaskEvent(event);
+        if (event.taskId !== 'health-check') {
+          setActiveTaskEvent(event);
+        }
       }
     }).then((stopListening) => {
       if (disposed) {
@@ -386,6 +439,14 @@ export function HubApp({ service = defaultService }: HubAppProps) {
     };
   }, [loadHealth, loadProjects, service]);
 
+  useEffect(() => {
+    if (!activeTask) {
+      return undefined;
+    }
+    const timer = globalThis.setInterval(() => setTaskClock(Date.now()), 1000);
+    return () => globalThis.clearInterval(timer);
+  }, [activeTask]);
+
   const statusLabel = healthState.status === 'ready'
     ? healthState.health.service.status
     : healthState.status === 'loading'
@@ -403,6 +464,18 @@ export function HubApp({ service = defaultService }: HubAppProps) {
       })
       .sort((left, right) => Number(right.favorite) - Number(left.favorite))
     : [];
+
+  const openZreadProvider = healthState.status === 'ready'
+    ? healthState.health.providers.find((provider) => provider.provider === 'open_zread')
+    : undefined;
+  const openZreadReady = openZreadProvider?.generator.status === 'available';
+  const currentTaskEvent = activeTask && activeTaskEvent?.taskId === activeTask.taskId
+    ? activeTaskEvent
+    : undefined;
+  const activeTaskStatus = currentTaskEvent
+    ? currentTaskEvent.status
+    : activeTask?.status;
+  const taskBusy = activeTaskStatus === 'queued' || activeTaskStatus === 'running' || activeTaskStatus === 'cancelling';
 
   return (
     <main className="hub-shell">
@@ -606,6 +679,27 @@ export function HubApp({ service = defaultService }: HubAppProps) {
                 <div className="project-actions">
                   <button
                     type="button"
+                    className="primary-button"
+                    data-testid={`generate-open-zread-${project.id}`}
+                    disabled={!openZreadReady || project.availability !== 'available' || taskBusy || projectAction !== 'idle'}
+                    onClick={() => void startOpenZreadTask(project, 'generate')}
+                  >
+                    Generate OpenZread
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    data-testid={`sync-open-zread-${project.id}`}
+                    disabled={!openZreadReady || project.availability !== 'available'
+                      || project.wiki.openZread === 'missing'
+                      || project.wiki.openZread === 'unavailable'
+                      || taskBusy || projectAction !== 'idle'}
+                    onClick={() => void startOpenZreadTask(project, 'sync')}
+                  >
+                    Sync OpenZread
+                  </button>
+                  <button
+                    type="button"
                     className="secondary-button"
                     data-testid={`open-open-zread-${project.id}`}
                     disabled={project.availability !== 'available'
@@ -718,6 +812,35 @@ export function HubApp({ service = defaultService }: HubAppProps) {
             : service.readOpenZreadAsset(projectId, pagePath, assetPath)}
           onClose={() => setReaderState({ status: 'closed' })}
         />
+      )}
+
+      {activeTask && (
+        <section className="task-panel" aria-live="polite" data-testid="active-task">
+          <div>
+            <p className="eyebrow">ACTIVE TASK</p>
+            <h2>{activeTask.operation === 'generate' ? 'Generating OpenZread Wiki' : 'Syncing OpenZread Wiki'}</h2>
+            <p className="task-panel-meta">
+              Project: {activeTask.projectId} · Provider: OpenZread · Model: {activeTask.model}
+            </p>
+          </div>
+          <dl className="task-panel-details">
+            <div><dt>Status</dt><dd data-testid="task-status">{activeTaskStatus}</dd></div>
+            <div><dt>Phase</dt><dd data-testid="task-phase">{currentTaskEvent?.phase ?? 'starting'}</dd></div>
+            <div><dt>Elapsed</dt><dd data-testid="task-elapsed">{formatElapsed(activeTask.startedAt, taskClock)}</dd></div>
+          </dl>
+          {currentTaskEvent?.message && <p className="task-panel-message">{currentTaskEvent.message}</p>}
+          {currentTaskEvent?.progress && (
+            <p className="task-panel-progress">
+              {currentTaskEvent.progress.current} / {currentTaskEvent.progress.total} pages
+            </p>
+          )}
+          {taskMessage && <p className="task-panel-message" role="status">{taskMessage}</p>}
+          {taskBusy && (
+            <button type="button" className="danger-button" data-testid="cancel-active-task" onClick={() => void cancelActiveTask()}>
+              Cancel task
+            </button>
+          )}
+        </section>
       )}
 
       <section className="surface-grid" aria-label="Hub capabilities">

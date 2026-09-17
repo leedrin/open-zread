@@ -25,6 +25,8 @@ import {
   type HubProviderHealth,
   type HubProviderGeneratorHealth,
   type HubTaskEvent,
+  type HubTask,
+  type HubOpenZreadOperation,
   type RegisterProjectResponse,
 } from '@open-zread/hub-contract';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
@@ -66,6 +68,7 @@ export interface HubApplicationService {
   readZreadWiki(projectId: string): Promise<HubZreadWiki>;
   readZreadSource(projectId: string, path: string): Promise<HubSourceFile>;
   readZreadAsset(projectId: string, pagePath: string, assetPath: string): Promise<HubWikiAsset>;
+  startOpenZreadTask(projectId: string, operation: HubOpenZreadOperation): Promise<HubTask>;
   cancelTask(taskId: string): Promise<CancelTaskResponse>;
   subscribeToTaskEvents(listener: (event: HubTaskEvent) => void): Promise<Unsubscribe>;
 }
@@ -492,6 +495,37 @@ function parseTaskEvent(value: unknown): HubTaskEvent {
   };
 }
 
+function parseTask(value: unknown): HubTask {
+  if (!isRecord(value)) {
+    throw new HubProtocolError('Invalid Hub response: task payload is malformed.');
+  }
+  const kind = requiredString(value.kind, 'kind');
+  const status = requiredString(value.status, 'status');
+  const operation = requiredString(value.operation, 'operation');
+  if (kind !== 'generation' && kind !== 'update') {
+    throw new HubProtocolError('Invalid Hub response: task kind is unsupported.');
+  }
+  if (status !== 'queued' && status !== 'running') {
+    throw new HubProtocolError('Invalid Hub response: task status is unsupported.');
+  }
+  if (operation !== 'generate' && operation !== 'sync') {
+    throw new HubProtocolError('Invalid Hub response: OpenZread operation is unsupported.');
+  }
+  if (value.provider !== 'open_zread') {
+    throw new HubProtocolError('Invalid Hub response: task provider is unsupported.');
+  }
+  return {
+    taskId: requiredString(value.taskId, 'taskId'),
+    kind,
+    status,
+    projectId: requiredString(value.projectId, 'projectId'),
+    provider: 'open_zread',
+    operation,
+    model: requiredString(value.model, 'model'),
+    startedAt: requiredString(value.startedAt, 'startedAt'),
+  };
+}
+
 /**
  * Create the typed client used by React and future Tauri command adapters.
  * React never receives a filesystem or process capability from this boundary.
@@ -684,6 +718,20 @@ export function createHubApplicationService(
         pagePath: normalizedPagePath,
         assetPath: normalizedAssetPath,
       }).then(parseWikiAsset);
+    },
+
+    startOpenZreadTask(projectId, operation) {
+      const normalizedId = projectId.trim();
+      if (!normalizedId) {
+        return invalidRequest('Project id is required.');
+      }
+      if (operation !== 'generate' && operation !== 'sync') {
+        return invalidRequest('OpenZread operation must be generate or sync.');
+      }
+      return transport.invoke(HUB_COMMANDS.startOpenZreadTask, {
+        projectId: normalizedId,
+        operation,
+      }).then(parseTask);
     },
 
     cancelTask(taskId) {

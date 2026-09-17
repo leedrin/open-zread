@@ -200,6 +200,19 @@ pub struct HubTaskEvent {
     pub progress: Option<HubTaskProgress>,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubTask {
+    pub task_id: String,
+    pub kind: &'static str,
+    pub status: &'static str,
+    pub project_id: String,
+    pub provider: &'static str,
+    pub operation: &'static str,
+    pub model: &'static str,
+    pub started_at: String,
+}
+
 pub const TASK_EVENT: &str = "hub://task-event";
 
 #[cfg(test)]

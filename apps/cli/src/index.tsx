@@ -3,6 +3,7 @@ import { loadConfigSync } from "@open-zread/utils";
 import { getVersion } from "./utils";
 import { runConfig } from "./commands/config";
 import { runWiki } from "./commands/wiki";
+import { runOpenZreadStdioCommand, type OpenZreadStdioOperation } from "./commands/wiki-stdio";
 import { runBrowse } from "./commands/browse";
 import { zhCN } from "./i18n/translations/zh-CN";
 import { enUS } from "./i18n/translations/en-US";
@@ -23,7 +24,17 @@ program
 program
   .command("wiki", { isDefault: true })
   .description(t.cli.wikiDesc)
-  .action(async () => {
+  .option('--stdio', 'Run a machine-readable Hub task')
+  .option('--operation <operation>', 'Hub operation: generate or sync', 'generate')
+  .action(async (options: { stdio?: boolean; operation?: string }) => {
+    if (options.stdio) {
+      const operation = options.operation;
+      if (operation !== 'generate' && operation !== 'sync') {
+        throw new Error(`Unsupported stdio wiki operation: ${operation}`);
+      }
+      await runOpenZreadStdioCommand(process.cwd(), operation as OpenZreadStdioOperation);
+      return;
+    }
     await runWiki();
   });
 

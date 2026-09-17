@@ -1,8 +1,8 @@
 use crate::contracts::{
     CancelTaskResponse, HubCommandError, HubHealth, HubOpenZreadWiki, HubProject,
     HubProviderCapabilities, HubProviderContentHealth, HubProviderGeneratorHealth,
-    HubProviderHealth, HubRunnerInfo, HubServiceHealth, HubSourceFile, HubTaskEvent, HubWikiAsset,
-    RegisterProjectResponse, TASK_EVENT,
+    HubProviderHealth, HubRunnerInfo, HubServiceHealth, HubSourceFile, HubTask, HubTaskEvent,
+    HubWikiAsset, RegisterProjectResponse, TASK_EVENT,
 };
 use crate::projects::{
     list_projects, open_project_folder, open_project_terminal, register_project, relocate_project,
@@ -12,12 +12,13 @@ use crate::reader::{
     read_open_zread_asset, read_open_zread_source, read_open_zread_wiki, read_zread_asset,
     read_zread_source, read_zread_wiki,
 };
+use crate::tasks::TaskCoordinator;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const RUNNER_RESOURCE_DIR: &str = "open-zread";
 const RUNNER_EXECUTABLE: &str = "open-zread.exe";
@@ -134,6 +135,18 @@ fn inspect_runner(app: &AppHandle) -> HubRunnerInfo {
     }
 }
 
+pub(crate) fn embedded_runner_executable(app: &AppHandle) -> Result<PathBuf, HubCommandError> {
+    let runner = inspect_runner(app);
+    if runner.status != "available" {
+        return Err(HubCommandError {
+            code: "service_unavailable",
+            message: "The embedded OpenZread runner is unavailable.".to_string(),
+            retryable: true,
+        });
+    }
+    Ok(PathBuf::from(runner.executable_path))
+}
+
 fn unavailable_provider_capabilities() -> HubProviderCapabilities {
     HubProviderCapabilities {
         generate: false,
@@ -152,22 +165,22 @@ fn unavailable_provider_capabilities() -> HubProviderCapabilities {
 }
 
 fn open_zread_capabilities() -> HubProviderCapabilities {
-    // The embedded runner exposes the `wiki` generation command. It does not
-    // expose a verified incremental Sync command, so the Hub must not invent
-    // one in the UI.
+    // The embedded runner exposes the Hub-owned machine-readable wiki command.
+    // Sync is implemented by the OpenZread application service: it computes a
+    // real manifest diff before asking the model to regenerate affected pages.
     HubProviderCapabilities {
         generate: true,
         regenerate: true,
-        sync: false,
+        sync: true,
         login: false,
         custom_api_key_login: false,
-        machine_readable: false,
-        unattended: false,
+        machine_readable: true,
+        unattended: true,
         existing_draft_actions: false,
         skip_failed_pages: false,
         cli_self_update: false,
-        structured_progress: false,
-        incremental_wiki_update: false,
+        structured_progress: true,
+        incremental_wiki_update: true,
     }
 }
 
@@ -562,6 +575,16 @@ pub fn set_hub_zread_executable(
 }
 
 #[tauri::command]
+pub fn start_hub_open_zread_task(
+    app: AppHandle,
+    coordinator: State<'_, TaskCoordinator>,
+    project_id: String,
+    operation: String,
+) -> Result<HubTask, HubCommandError> {
+    crate::tasks::start_open_zread_task(&app, &coordinator, &project_id, &operation)
+}
+
+#[tauri::command]
 pub fn list_hub_projects(app: AppHandle) -> Result<Vec<HubProject>, HubCommandError> {
     list_projects(&app)
 }
@@ -667,23 +690,13 @@ pub fn read_hub_zread_asset(
     read_zread_asset(&app, &project_id, &page_path, &asset_path)
 }
 
-/// Cancellation is deliberately explicit and typed even before task execution
-/// is added. A missing task never looks like a successful cancellation.
 #[tauri::command]
-pub fn cancel_hub_task(task_id: String) -> Result<CancelTaskResponse, HubCommandError> {
-    if task_id.trim().is_empty() {
-        return Err(HubCommandError {
-            code: "invalid_request",
-            message: "Task id is required.".to_string(),
-            retryable: false,
-        });
-    }
-
-    Err(HubCommandError {
-        code: "task_not_found",
-        message: format!("Task '{}' is not active.", task_id.trim()),
-        retryable: false,
-    })
+pub fn cancel_hub_task(
+    app: AppHandle,
+    coordinator: State<'_, TaskCoordinator>,
+    task_id: String,
+) -> Result<CancelTaskResponse, HubCommandError> {
+    crate::tasks::cancel_task(&app, &coordinator, &task_id)
 }
 
 #[cfg(test)]

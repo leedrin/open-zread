@@ -166,6 +166,18 @@ function createLibraryService(
           ],
         };
       }
+      if (command === 'start_hub_open_zread_task') {
+        return {
+          taskId: 'task-1',
+          kind: args?.operation === 'sync' ? 'update' : 'generation',
+          status: 'running',
+          projectId: String(args?.projectId),
+          provider: 'open_zread',
+          operation: args?.operation,
+          model: 'Hub shared model configuration',
+          startedAt: '1720000000000',
+        };
+      }
       if (command === 'read_hub_open_zread_source') {
         return { path: 'src/main.ts', content: 'export const main = true;\n' };
       }
@@ -333,6 +345,33 @@ describe('Project Library UI', () => {
     });
     expect(renderer?.root.findByProps({ 'data-testid': 'source-content-text' }).children.join(' '))
       .toContain('export const main = true;');
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  test('starts an explicit OpenZread generation task from a Project card', async () => {
+    const commands: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const service = createLibraryService(commands, []);
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(<HubApp service={service} />);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'generate-open-zread-project-1' }).props.onClick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(commands).toContainEqual({
+      command: 'start_hub_open_zread_task',
+      args: { projectId: firstProject.id, operation: 'generate' },
+    });
+    expect(renderer?.root.findByProps({ 'data-testid': 'active-task' })).toBeDefined();
+    expect(renderer?.root.findByProps({ 'data-testid': 'task-status' }).children).toEqual(['running']);
 
     await act(async () => {
       renderer?.unmount();

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { HubProject } from '@open-zread/hub-contract';
+import type { HubProject, HubTask } from '@open-zread/hub-contract';
 import {
   createHubApplicationService,
   type HubTransport,
@@ -17,6 +17,17 @@ const project: HubProject = {
     zread: 'missing',
   },
   favorite: false,
+};
+
+const task: HubTask = {
+  taskId: 'task-1',
+  kind: 'generation',
+  status: 'running',
+  projectId: project.id,
+  provider: 'open_zread',
+  operation: 'generate',
+  model: 'Hub shared model configuration',
+  startedAt: '1720000000000',
 };
 
 function createTransport(
@@ -92,6 +103,27 @@ describe('Project Library application-service interface', () => {
     await expect(service.setProjectFavorite('', true)).rejects.toMatchObject({ code: 'invalid_request' });
     await expect(service.relocateProject(project.id, '  ')).rejects.toMatchObject({ code: 'invalid_request' });
     await expect(service.copyProjectPath('  ')).rejects.toMatchObject({ code: 'invalid_request' });
+    expect(calls).toEqual([]);
+  });
+
+  test('starts OpenZread generation and sync through the typed task command', async () => {
+    const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const service = createHubApplicationService(createTransport({
+      start_hub_open_zread_task: task,
+    }, [], calls));
+
+    await expect(service.startOpenZreadTask(project.id, 'generate')).resolves.toEqual(task);
+    expect(calls).toEqual([
+      { command: 'start_hub_open_zread_task', args: { projectId: project.id, operation: 'generate' } },
+    ]);
+  });
+
+  test('rejects invalid task inputs before crossing the transport seam', async () => {
+    const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const service = createHubApplicationService(createTransport({}, [], calls));
+
+    await expect(service.startOpenZreadTask('  ', 'generate')).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(service.startOpenZreadTask(project.id, 'unsupported' as 'generate')).rejects.toMatchObject({ code: 'invalid_request' });
     expect(calls).toEqual([]);
   });
 });

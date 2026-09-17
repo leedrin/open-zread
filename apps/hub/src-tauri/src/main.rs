@@ -2,14 +2,17 @@ mod commands;
 mod contracts;
 mod projects;
 mod reader;
+mod tasks;
 
 fn main() {
     tauri::Builder::default()
+        .manage(tasks::TaskCoordinator::default())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::get_hub_health,
             commands::set_hub_zread_executable,
+            commands::start_hub_open_zread_task,
             commands::cancel_hub_task,
             commands::list_hub_projects,
             commands::register_hub_project,
