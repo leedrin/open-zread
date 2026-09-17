@@ -3,6 +3,7 @@ import type {
   HubProject,
   HubSourceFile,
   HubWikiAsset,
+  HubWikiChangeSet,
   HubWikiDocument,
   HubWikiPage,
   HubWikiProvider,
@@ -25,6 +26,8 @@ interface OpenZreadReaderProps {
   switchingProvider: boolean;
   readSource: (projectId: string, path: string) => Promise<HubSourceFile>;
   readAsset: (projectId: string, pagePath: string, assetPath: string) => Promise<HubWikiAsset>;
+  previewChange: (projectId: string, provider: HubWikiProvider, slug: string, content: string) => Promise<HubWikiChangeSet>;
+  applyChange: (changeSetId: string) => Promise<HubWikiChangeSet>;
   onClose: () => void;
 }
 
@@ -257,6 +260,8 @@ export function OpenZreadReader({
   switchingProvider,
   readSource,
   readAsset,
+  previewChange,
+  applyChange,
   onClose,
 }: OpenZreadReaderProps) {
   const readablePages = wiki.pages.filter((page) => page.status === 'readable');
@@ -271,6 +276,12 @@ export function OpenZreadReader({
   const [sourceState, setSourceState] = useState<{ path: string; content: string } | null>(null);
   const [sourceLoading, setSourceLoading] = useState<string | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draftContent, setDraftContent] = useState('');
+  const [changeSet, setChangeSet] = useState<HubWikiChangeSet | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editedContent, setEditedContent] = useState<Record<string, string>>({});
   const articleRef = useRef<HTMLElement | null>(null);
   const selectedPage = wiki.pages.find((page) => page.slug === selectedSlug) ?? wiki.pages[0];
   const sections = useMemo(() => {
@@ -293,6 +304,10 @@ export function OpenZreadReader({
     setSourceState(null);
     setSourceLoading(null);
     setSourceError(null);
+    setEditing(false);
+    setChangeSet(null);
+    setEditError(null);
+    setEditedContent({});
   }, [wiki.provider, wiki.currentPointer, wiki.versionId]);
 
   useEffect(() => {
@@ -339,6 +354,54 @@ export function OpenZreadReader({
       setSourceLoading(null);
     }
   };
+
+  const startEditing = () => {
+    if (!selectedPage || selectedPage.status !== 'readable') {
+      return;
+    }
+    setDraftContent(editedContent[selectedPage.slug] ?? selectedPage.content ?? '');
+    setChangeSet(null);
+    setEditError(null);
+    setEditing(true);
+  };
+
+  const previewPageChange = async () => {
+    if (!selectedPage) {
+      return;
+    }
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      setChangeSet(await previewChange(project.id, wiki.provider, selectedPage.slug, draftContent));
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : 'Unable to preview the Wiki change.');
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
+  const applyPageChange = async () => {
+    if (!changeSet || !selectedPage) {
+      return;
+    }
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      const applied = await applyChange(changeSet.changeSetId);
+      setEditedContent((current) => ({ ...current, [selectedPage.slug]: applied.after }));
+      setDraftContent(applied.after);
+      setChangeSet(null);
+      setEditing(false);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : 'Unable to apply the Wiki change.');
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
+  const displayPage = selectedPage && editedContent[selectedPage.slug] !== undefined
+    ? { ...selectedPage, content: editedContent[selectedPage.slug] }
+    : selectedPage;
 
   return (
     <section
@@ -429,11 +492,48 @@ export function OpenZreadReader({
                   <p className="eyebrow">{selectedPage.section}</p>
                   <h3 data-testid={`wiki-page-${selectedPage.slug}`}>{selectedPage.title}</h3>
                 </div>
-                <span className={`availability-badge availability-${selectedPage.status}`}>{selectedPage.status}</span>
+                <div className="wiki-reader-page-actions">
+                  <span className={`availability-badge availability-${selectedPage.status}`}>{selectedPage.status}</span>
+                  {selectedPage.status === 'readable' && !editing && (
+                    <button type="button" className="secondary-button" data-testid={`edit-wiki-page-${selectedPage.slug}`} onClick={startEditing}>
+                      Edit page
+                    </button>
+                  )}
+                </div>
               </div>
-              {selectedPage.status === 'readable' && selectedPage.content !== undefined ? (
+              {editing && displayPage ? (
+                <div className="wiki-editor" data-testid="wiki-editor">
+                  <label htmlFor="wiki-editor-content">Markdown content</label>
+                  <textarea
+                    id="wiki-editor-content"
+                    data-testid="wiki-editor-content"
+                    value={draftContent}
+                    onChange={(event) => setDraftContent(event.target.value)}
+                    spellCheck={false}
+                  />
+                  <div className="wiki-editor-actions">
+                    <button type="button" className="secondary-button" disabled={editBusy} onClick={() => setEditing(false)}>Cancel</button>
+                    <button type="button" className="primary-button" data-testid="preview-wiki-change" disabled={editBusy} onClick={() => void previewPageChange()}>
+                      {editBusy ? 'Working…' : 'Preview ChangeSet'}
+                    </button>
+                  </div>
+                  {changeSet && (
+                    <div className="changeset-preview" data-testid="changeset-preview">
+                      <p><strong>ChangeSet preview</strong> · {changeSet.relativePath}</p>
+                      <div className="changeset-columns">
+                        <pre><code>{changeSet.before}</code></pre>
+                        <pre><code>{changeSet.after}</code></pre>
+                      </div>
+                      <button type="button" className="primary-button" data-testid="apply-wiki-change" disabled={editBusy} onClick={() => void applyPageChange()}>
+                        {editBusy ? 'Applying…' : 'Apply to original file'}
+                      </button>
+                    </div>
+                  )}
+                  {editError && <p className="wiki-reader-page-error" role="alert">{editError}</p>}
+                </div>
+              ) : selectedPage.status === 'readable' && displayPage?.content !== undefined ? (
                 <MarkdownContent
-                  page={selectedPage}
+                  page={displayPage}
                   wiki={wiki}
                   project={project}
                   readAsset={readAsset}

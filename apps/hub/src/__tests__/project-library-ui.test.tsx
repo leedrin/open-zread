@@ -178,6 +178,32 @@ function createLibraryService(
           startedAt: '1720000000000',
         };
       }
+      if (command === 'preview_hub_wiki_change') {
+        return {
+          changeSetId: 'change-1',
+          projectId: String(args?.projectId),
+          provider: args?.provider,
+          slug: String(args?.slug),
+          relativePath: '核心/architecture.md',
+          before: '# 架构设计',
+          after: String(args?.content),
+          status: 'preview',
+          createdAt: '1720000000000',
+        };
+      }
+      if (command === 'apply_hub_wiki_change') {
+        return {
+          changeSetId: 'change-1',
+          projectId: firstProject.id,
+          provider: 'open_zread',
+          slug: 'architecture',
+          relativePath: '核心/architecture.md',
+          before: '# 架构设计',
+          after: '# Updated architecture',
+          status: 'applied',
+          createdAt: '1720000000000',
+        };
+      }
       if (command === 'read_hub_open_zread_source') {
         return { path: 'src/main.ts', content: 'export const main = true;\n' };
       }
@@ -373,6 +399,45 @@ describe('Project Library UI', () => {
     expect(renderer?.root.findByProps({ 'data-testid': 'active-task' })).toBeDefined();
     expect(renderer?.root.findByProps({ 'data-testid': 'task-status' }).children).toEqual(['running']);
 
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  test('previews and applies a manual page ChangeSet back to the original Wiki file', async () => {
+    const commands: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const service = createLibraryService(commands, []);
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(<HubApp service={service} />);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'open-open-zread-project-1' }).props.onClick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'edit-wiki-page-architecture' }).props.onClick();
+    });
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'wiki-editor-content' }).props.onChange({
+        target: { value: '# Updated architecture' },
+      });
+      renderer?.root.findByProps({ 'data-testid': 'preview-wiki-change' }).props.onClick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(renderer?.root.findByProps({ 'data-testid': 'changeset-preview' })).toBeDefined();
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'apply-wiki-change' }).props.onClick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(commands).toContainEqual({
+      command: 'apply_hub_wiki_change',
+      args: { changeSetId: 'change-1' },
+    });
+    expect(renderer?.root.findAllByProps({ 'data-testid': 'changeset-preview' })).toHaveLength(0);
+    expect(renderer?.root.findByProps({ 'data-testid': 'wiki-page-architecture' })).toBeDefined();
     await act(async () => {
       renderer?.unmount();
     });

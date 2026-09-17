@@ -10,6 +10,8 @@ export const HUB_COMMANDS = {
   setZreadExecutable: 'set_hub_zread_executable',
   startOpenZreadTask: 'start_hub_open_zread_task',
   startZreadTask: 'start_hub_zread_task',
+  previewWikiChange: 'preview_hub_wiki_change',
+  applyWikiChange: 'apply_hub_wiki_change',
   cancelTask: 'cancel_hub_task',
   listProjects: 'list_hub_projects',
   registerProject: 'register_hub_project',
@@ -206,6 +208,20 @@ export interface HubTask {
   startedAt: string;
 }
 
+export type HubChangeSetStatus = 'preview' | 'applied' | 'rejected';
+
+export interface HubWikiChangeSet {
+  changeSetId: string;
+  projectId: string;
+  provider: HubWikiProvider;
+  slug: string;
+  relativePath: string;
+  before: string;
+  after: string;
+  status: HubChangeSetStatus;
+  createdAt: string;
+}
+
 export const HUB_TASK_KINDS = ['generation', 'update', 'maintenance'] as const;
 export const HUB_TASK_STATUSES = [
   'queued',
@@ -239,6 +255,7 @@ export type HubCommandErrorCode =
   | 'source_invalid_path'
   | 'asset_not_found'
   | 'asset_invalid_path'
+  | 'conflict'
   | 'service_unavailable'
   | 'internal_error';
 

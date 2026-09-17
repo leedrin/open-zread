@@ -27,6 +27,7 @@ import {
   type HubTaskEvent,
   type HubTask,
   type HubOpenZreadOperation,
+  type HubWikiChangeSet,
   type RegisterProjectResponse,
 } from '@open-zread/hub-contract';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
@@ -70,6 +71,8 @@ export interface HubApplicationService {
   readZreadAsset(projectId: string, pagePath: string, assetPath: string): Promise<HubWikiAsset>;
   startOpenZreadTask(projectId: string, operation: HubOpenZreadOperation): Promise<HubTask>;
   startZreadTask(projectId: string): Promise<HubTask>;
+  previewWikiChange(projectId: string, provider: HubWikiProvider, slug: string, content: string): Promise<HubWikiChangeSet>;
+  applyWikiChange(changeSetId: string): Promise<HubWikiChangeSet>;
   cancelTask(taskId: string): Promise<CancelTaskResponse>;
   subscribeToTaskEvents(listener: (event: HubTaskEvent) => void): Promise<Unsubscribe>;
 }
@@ -527,6 +530,31 @@ function parseTask(value: unknown): HubTask {
   };
 }
 
+function parseChangeSet(value: unknown): HubWikiChangeSet {
+  if (!isRecord(value)) {
+    throw new HubProtocolError('Invalid Hub response: ChangeSet payload is malformed.');
+  }
+  const provider = value.provider;
+  const status = value.status;
+  if (provider !== 'open_zread' && provider !== 'zread') {
+    throw new HubProtocolError('Invalid Hub response: ChangeSet provider is unsupported.');
+  }
+  if (status !== 'preview' && status !== 'applied' && status !== 'rejected') {
+    throw new HubProtocolError('Invalid Hub response: ChangeSet status is unsupported.');
+  }
+  return {
+    changeSetId: requiredString(value.changeSetId, 'changeSetId'),
+    projectId: requiredString(value.projectId, 'projectId'),
+    provider,
+    slug: requiredString(value.slug, 'slug'),
+    relativePath: requiredString(value.relativePath, 'relativePath'),
+    before: requiredString(value.before, 'before'),
+    after: requiredString(value.after, 'after'),
+    status,
+    createdAt: requiredString(value.createdAt, 'createdAt'),
+  };
+}
+
 /**
  * Create the typed client used by React and future Tauri command adapters.
  * React never receives a filesystem or process capability from this boundary.
@@ -743,6 +771,33 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.startZreadTask, {
         projectId: normalizedId,
       }).then(parseTask);
+    },
+
+    previewWikiChange(projectId, provider, slug, content) {
+      const normalizedId = projectId.trim();
+      const normalizedSlug = slug.trim();
+      if (!normalizedId || !normalizedSlug) {
+        return invalidRequest('Project id and page slug are required.');
+      }
+      if (provider !== 'open_zread' && provider !== 'zread') {
+        return invalidRequest('Wiki provider is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.previewWikiChange, {
+        projectId: normalizedId,
+        provider,
+        slug: normalizedSlug,
+        content,
+      }).then(parseChangeSet);
+    },
+
+    applyWikiChange(changeSetId) {
+      const normalizedId = changeSetId.trim();
+      if (!normalizedId) {
+        return invalidRequest('ChangeSet id is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.applyWikiChange, {
+        changeSetId: normalizedId,
+      }).then(parseChangeSet);
     },
 
     cancelTask(taskId) {

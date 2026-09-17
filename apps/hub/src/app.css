@@ -221,6 +221,8 @@ h3 { margin-bottom: 8px; font-size: 16px; }
 .wiki-reader-article-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 25px; padding-bottom: 18px; border-bottom: 1px solid var(--ui-border); }
 .wiki-reader-article-heading .eyebrow { margin-bottom: 5px; }
 .wiki-reader-article-heading h3 { margin: 0; font-size: 24px; }
+.wiki-reader-page-actions { display: flex; align-items: center; gap: 8px; }
+.wiki-reader-page-actions .secondary-button { min-height: 30px; padding: 5px 9px; font-size: 12px; }
 .availability-readable { color: var(--ui-brand-strong); background: var(--ui-brand-soft); }
 .availability-unreadable { color: #b34655; background: var(--ui-danger-soft); }
 .wiki-reader-markdown { color: var(--ui-ink); font-size: 14px; line-height: 1.75; }
@@ -245,6 +247,16 @@ h3 { margin-bottom: 8px; font-size: 16px; }
 .wiki-reader-source-button:hover, .wiki-reader-source-button:focus-visible { border-color: var(--ui-info); background: var(--ui-info-soft); outline: 0; }
 .wiki-reader-source-button:disabled { cursor: wait; opacity: .6; }
 .wiki-reader-source-content { overflow: auto; margin: 16px 0 0; border: 1px solid var(--ui-border); border-radius: 8px; padding: 14px; color: var(--ui-ink-secondary); background: var(--ui-surface-subtle); font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre; }
+.wiki-editor { display: grid; gap: 12px; }
+.wiki-editor > label { color: var(--ui-ink-secondary); font-size: 12px; font-weight: 650; }
+.wiki-editor textarea { min-height: 360px; resize: vertical; border: 1px solid var(--ui-border-strong); border-radius: 8px; padding: 14px; color: var(--ui-ink); background: var(--ui-surface-subtle); font: 13px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.wiki-editor textarea:focus { border-color: var(--ui-info); outline: 2px solid rgba(59, 130, 246, .2); }
+.wiki-editor-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.changeset-preview { display: grid; gap: 10px; border: 1px solid var(--ui-border); border-radius: 9px; padding: 12px; background: var(--ui-surface-subtle); }
+.changeset-preview p { margin: 0; color: var(--ui-ink-secondary); font-size: 12px; }
+.changeset-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.changeset-columns pre { min-width: 0; max-height: 240px; overflow: auto; margin: 0; border: 1px solid var(--ui-border); border-radius: 7px; padding: 10px; color: var(--ui-ink-secondary); background: var(--ui-surface); font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
+.changeset-preview .primary-button { justify-self: end; }
 
 @media (max-width: 1020px) {
   .hub-shell { width: min(900px, calc(100% - 48px)); }

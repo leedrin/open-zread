@@ -1,5 +1,6 @@
 mod commands;
 mod contracts;
+mod mutations;
 mod projects;
 mod reader;
 mod tasks;
@@ -7,6 +8,7 @@ mod tasks;
 fn main() {
     tauri::Builder::default()
         .manage(tasks::TaskCoordinator::default())
+        .manage(mutations::ChangeSetCoordinator::default())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -14,6 +16,8 @@ fn main() {
             commands::set_hub_zread_executable,
             commands::start_hub_open_zread_task,
             commands::start_hub_zread_task,
+            commands::preview_hub_wiki_change,
+            commands::apply_hub_wiki_change,
             commands::cancel_hub_task,
             commands::list_hub_projects,
             commands::register_hub_project,

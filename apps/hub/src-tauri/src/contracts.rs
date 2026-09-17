@@ -213,6 +213,20 @@ pub struct HubTask {
     pub started_at: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiChangeSet {
+    pub change_set_id: String,
+    pub project_id: String,
+    pub provider: &'static str,
+    pub slug: String,
+    pub relative_path: String,
+    pub before: String,
+    pub after: String,
+    pub status: &'static str,
+    pub created_at: String,
+}
+
 pub const TASK_EVENT: &str = "hub://task-event";
 
 #[cfg(test)]

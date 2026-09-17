@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { HubProject, HubTask } from '@open-zread/hub-contract';
+import type { HubProject, HubTask, HubWikiChangeSet } from '@open-zread/hub-contract';
 import {
   createHubApplicationService,
   type HubTransport,
@@ -35,6 +35,18 @@ const zreadTask: HubTask = {
   taskId: 'task-zread-1',
   provider: 'zread',
   model: 'Zread native configuration',
+};
+
+const changeSet: HubWikiChangeSet = {
+  changeSetId: 'change-1',
+  projectId: project.id,
+  provider: 'open_zread',
+  slug: 'overview',
+  relativePath: 'Core/overview.md',
+  before: '# Before',
+  after: '# After',
+  status: 'preview',
+  createdAt: '1720000000000',
 };
 
 function createTransport(
@@ -118,13 +130,22 @@ describe('Project Library application-service interface', () => {
     const service = createHubApplicationService(createTransport({
       start_hub_open_zread_task: task,
       start_hub_zread_task: zreadTask,
+      preview_hub_wiki_change: changeSet,
+      apply_hub_wiki_change: { ...changeSet, status: 'applied' },
     }, [], calls));
 
     await expect(service.startOpenZreadTask(project.id, 'generate')).resolves.toEqual(task);
     await expect(service.startZreadTask(project.id)).resolves.toEqual(zreadTask);
+    await expect(service.previewWikiChange(project.id, 'open_zread', 'overview', '# After')).resolves.toEqual(changeSet);
+    await expect(service.applyWikiChange(changeSet.changeSetId)).resolves.toMatchObject({ status: 'applied' });
     expect(calls).toEqual([
       { command: 'start_hub_open_zread_task', args: { projectId: project.id, operation: 'generate' } },
       { command: 'start_hub_zread_task', args: { projectId: project.id } },
+      {
+        command: 'preview_hub_wiki_change',
+        args: { projectId: project.id, provider: 'open_zread', slug: 'overview', content: '# After' },
+      },
+      { command: 'apply_hub_wiki_change', args: { changeSetId: changeSet.changeSetId } },
     ]);
   });
 

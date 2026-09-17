@@ -842,6 +842,8 @@ export function HubApp({ service = defaultService }: HubAppProps) {
           readAsset={(projectId, pagePath, assetPath) => readerState.wiki.provider === 'zread'
             ? service.readZreadAsset(projectId, pagePath, assetPath)
             : service.readOpenZreadAsset(projectId, pagePath, assetPath)}
+          previewChange={service.previewWikiChange}
+          applyChange={service.applyWikiChange}
           onClose={() => setReaderState({ status: 'closed' })}
         />
       )}

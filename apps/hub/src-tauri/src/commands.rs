@@ -2,8 +2,9 @@ use crate::contracts::{
     CancelTaskResponse, HubCommandError, HubHealth, HubOpenZreadWiki, HubProject,
     HubProviderCapabilities, HubProviderContentHealth, HubProviderGeneratorHealth,
     HubProviderHealth, HubRunnerInfo, HubServiceHealth, HubSourceFile, HubTask, HubTaskEvent,
-    HubWikiAsset, RegisterProjectResponse, TASK_EVENT,
+    HubWikiAsset, HubWikiChangeSet, RegisterProjectResponse, TASK_EVENT,
 };
+use crate::mutations::ChangeSetCoordinator;
 use crate::projects::{
     list_projects, open_project_folder, open_project_terminal, register_project, relocate_project,
     remove_project, set_project_favorite,
@@ -614,6 +615,27 @@ pub fn start_hub_zread_task(
     project_id: String,
 ) -> Result<HubTask, HubCommandError> {
     crate::tasks::start_zread_task(&app, &coordinator, &project_id)
+}
+
+#[tauri::command]
+pub fn preview_hub_wiki_change(
+    app: AppHandle,
+    coordinator: State<'_, ChangeSetCoordinator>,
+    project_id: String,
+    provider: String,
+    slug: String,
+    content: String,
+) -> Result<HubWikiChangeSet, HubCommandError> {
+    crate::mutations::preview_change(&app, &coordinator, &project_id, &provider, &slug, &content)
+}
+
+#[tauri::command]
+pub fn apply_hub_wiki_change(
+    app: AppHandle,
+    coordinator: State<'_, ChangeSetCoordinator>,
+    change_set_id: String,
+) -> Result<HubWikiChangeSet, HubCommandError> {
+    crate::mutations::apply_change(&app, &coordinator, &change_set_id)
 }
 
 #[tauri::command]
