@@ -18,6 +18,9 @@ export const HUB_COMMANDS = {
   readOpenZreadWiki: 'read_hub_open_zread_wiki',
   readOpenZreadSource: 'read_hub_open_zread_source',
   readOpenZreadAsset: 'read_hub_open_zread_asset',
+  readZreadWiki: 'read_hub_zread_wiki',
+  readZreadSource: 'read_hub_zread_source',
+  readZreadAsset: 'read_hub_zread_asset',
 } as const;
 
 export const HUB_EVENTS = {
@@ -99,12 +102,19 @@ export interface HubWikiPage {
   native: Record<string, unknown>;
 }
 
-export interface HubOpenZreadWiki {
-  provider: 'open_zread';
+export type HubWikiProvider = 'open_zread' | 'zread';
+
+export interface HubWikiDocument {
+  provider: HubWikiProvider;
   status: Extract<HubWikiStatus, 'readable' | 'partial'>;
   catalog: HubWikiCatalog;
   pages: HubWikiPage[];
+  currentPointer?: string;
+  versionId?: string;
 }
+
+export type HubOpenZreadWiki = HubWikiDocument & { provider: 'open_zread' };
+export type HubZreadWiki = HubWikiDocument & { provider: 'zread' };
 
 export interface HubSourceFile {
   path: string;

@@ -96,7 +96,13 @@ pub struct HubOpenZreadWiki {
     pub status: &'static str,
     pub catalog: HubWikiCatalog,
     pub pages: Vec<HubWikiPage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_pointer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version_id: Option<String>,
 }
+
+pub type HubZreadWiki = HubOpenZreadWiki;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

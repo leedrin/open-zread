@@ -19,7 +19,10 @@ fn main() {
             commands::open_hub_project_terminal,
             commands::read_hub_open_zread_wiki,
             commands::read_hub_open_zread_source,
-            commands::read_hub_open_zread_asset
+            commands::read_hub_open_zread_asset,
+            commands::read_hub_zread_wiki,
+            commands::read_hub_zread_source,
+            commands::read_hub_zread_asset
         ])
         .run(tauri::generate_context!())
         .expect("error while running Open Zread Hub");

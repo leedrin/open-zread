@@ -207,7 +207,150 @@ fn read_open_zread_wiki_from_root(
             native: native_catalog,
         },
         pages,
+        current_pointer: None,
+        version_id: None,
     })
+}
+
+fn zread_wiki_root(project_root: &Path) -> PathBuf {
+    project_root.join(".zread").join("wiki")
+}
+
+fn read_zread_version_root(project_root: &Path) -> Result<(PathBuf, String), HubCommandError> {
+    let wiki_root = zread_wiki_root(project_root);
+    if !wiki_root.is_dir() {
+        return Err(reader_error(
+            "wiki_not_found",
+            "This Project does not contain a Zread Wiki.",
+            false,
+        ));
+    }
+
+    let current_path = wiki_root.join("current");
+    if !current_path.is_file() {
+        return Err(reader_error(
+            "wiki_invalid",
+            "The Zread Wiki current pointer is missing or unreadable.",
+            false,
+        ));
+    }
+    let pointer = fs::read_to_string(&current_path)
+        .map_err(|_| {
+            reader_error(
+                "wiki_read_failed",
+                "The Zread Wiki current pointer could not be read.",
+                true,
+            )
+        })?
+        .trim_start_matches('\u{feff}')
+        .trim()
+        .to_string();
+    if !safe_relative_path(&pointer) {
+        return Err(reader_error(
+            "wiki_invalid",
+            "The Zread Wiki current pointer must be a non-empty relative path.",
+            false,
+        ));
+    }
+    let version_root = safe_page_path(&wiki_root, &[&pointer]).ok_or_else(|| {
+        reader_error(
+            "wiki_invalid",
+            "The Zread Wiki current pointer resolves outside the Wiki versions directory.",
+            false,
+        )
+    })?;
+    if !version_root.is_dir() {
+        return Err(reader_error(
+            "wiki_invalid",
+            format!("The Zread Wiki current pointer does not resolve to a version: {pointer}"),
+            false,
+        ));
+    }
+    Ok((version_root, pointer))
+}
+
+fn read_zread_wiki_from_root(
+    project_root: &Path,
+) -> Result<crate::contracts::HubZreadWiki, HubCommandError> {
+    let (wiki_root, current_pointer) = read_zread_version_root(project_root)?;
+    let catalog_path = wiki_root.join("wiki.json");
+    let catalog_contents = fs::read_to_string(&catalog_path).map_err(|_| {
+        reader_error(
+            "wiki_not_found",
+            format!(
+                "The Zread Wiki catalog for current version '{current_pointer}' could not be read."
+            ),
+            true,
+        )
+    })?;
+    let native_catalog = serde_json::from_str::<Value>(&catalog_contents).map_err(|_| {
+        reader_error(
+            "wiki_invalid",
+            format!(
+                "The Zread Wiki catalog for current version '{current_pointer}' is not valid JSON."
+            ),
+            false,
+        )
+    })?;
+    let Some(catalog_object) = native_catalog.as_object() else {
+        return Err(reader_error(
+            "wiki_invalid",
+            "The Zread Wiki catalog must be a JSON object.",
+            false,
+        ));
+    };
+    let Some(page_values) = catalog_object.get("pages").and_then(Value::as_array) else {
+        return Err(reader_error(
+            "wiki_invalid",
+            "The Zread Wiki catalog does not contain a pages array.",
+            false,
+        ));
+    };
+    if page_values.is_empty() {
+        return Err(reader_error(
+            "wiki_invalid",
+            "The Zread Wiki catalog does not contain any pages.",
+            false,
+        ));
+    }
+    let pages = page_values
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(index, page)| read_page(index, page, &wiki_root))
+        .collect::<Vec<_>>();
+    let status = if pages.iter().all(|page| page.status == "readable") {
+        "readable"
+    } else {
+        "partial"
+    };
+    let version_id = object_string(catalog_object, "id").or_else(|| {
+        current_pointer
+            .rsplit(['/', '\\'])
+            .next()
+            .map(ToOwned::to_owned)
+    });
+    Ok(crate::contracts::HubZreadWiki {
+        provider: "zread",
+        status,
+        catalog: HubWikiCatalog {
+            id: object_string(catalog_object, "id"),
+            generated_at: object_string(catalog_object, "generated_at"),
+            language: object_string(catalog_object, "language"),
+            native: native_catalog,
+        },
+        pages,
+        current_pointer: Some(current_pointer),
+        version_id,
+    })
+}
+
+pub(crate) fn read_zread_wiki(
+    app: &tauri::AppHandle,
+    project_id: &str,
+) -> Result<crate::contracts::HubZreadWiki, HubCommandError> {
+    let project_root = project_root(app, project_id)?;
+    read_zread_wiki_from_root(&project_root)
 }
 
 pub(crate) fn read_open_zread_wiki(
@@ -257,6 +400,14 @@ pub(crate) fn read_open_zread_source(
     })
 }
 
+pub(crate) fn read_zread_source(
+    app: &tauri::AppHandle,
+    project_id: &str,
+    raw_path: &str,
+) -> Result<HubSourceFile, HubCommandError> {
+    read_open_zread_source(app, project_id, raw_path)
+}
+
 fn mime_type(path: &Path) -> &'static str {
     match path
         .extension()
@@ -293,6 +444,78 @@ pub(crate) fn read_open_zread_asset(
     }
     let root = project_root(app, project_id)?;
     let wiki_root = wiki_root(&root);
+    let requested_page = Path::new(page_path_text);
+    let requested_file = requested_page
+        .file_name()
+        .and_then(|file| file.to_str())
+        .unwrap_or(page_path_text);
+    let requested_section = requested_page
+        .parent()
+        .and_then(|section| section.to_str())
+        .unwrap_or_default();
+    let page_path = page_path(&wiki_root, requested_section, requested_file).ok_or_else(|| {
+        reader_error(
+            "asset_invalid_path",
+            "Wiki assets must stay inside the registered Project Wiki.",
+            false,
+        )
+    })?;
+    let candidate = page_path
+        .parent()
+        .unwrap_or(&wiki_root)
+        .join(asset_path_text);
+    let canonical_root = fs::canonicalize(&wiki_root).map_err(|_| {
+        reader_error(
+            "asset_invalid_path",
+            "Wiki assets must stay inside the registered Project Wiki.",
+            false,
+        )
+    })?;
+    let canonical_candidate = fs::canonicalize(&candidate).map_err(|_| {
+        reader_error(
+            "asset_not_found",
+            "The Wiki image could not be read.",
+            false,
+        )
+    })?;
+    if !canonical_candidate.starts_with(&canonical_root) || !canonical_candidate.is_file() {
+        return Err(reader_error(
+            "asset_invalid_path",
+            "Wiki assets must stay inside the registered Project Wiki.",
+            false,
+        ));
+    }
+    let bytes = fs::read(&canonical_candidate)
+        .map_err(|_| reader_error("asset_not_found", "The Wiki image could not be read.", true))?;
+    let relative_path = canonical_candidate
+        .strip_prefix(&canonical_root)
+        .unwrap_or(&canonical_candidate)
+        .to_string_lossy()
+        .replace('\\', "/");
+    Ok(HubWikiAsset {
+        path: relative_path,
+        mime_type: mime_type(&canonical_candidate).to_string(),
+        bytes,
+    })
+}
+
+pub(crate) fn read_zread_asset(
+    app: &tauri::AppHandle,
+    project_id: &str,
+    page_path_text: &str,
+    asset_path_text: &str,
+) -> Result<HubWikiAsset, HubCommandError> {
+    let page_path_text = page_path_text.trim();
+    let asset_path_text = asset_path_text.trim();
+    if !safe_relative_path(page_path_text) || !safe_relative_path(asset_path_text) {
+        return Err(reader_error(
+            "asset_invalid_path",
+            "Wiki assets must stay inside the registered Project Wiki.",
+            false,
+        ));
+    }
+    let root = project_root(app, project_id)?;
+    let (wiki_root, _) = read_zread_version_root(&root)?;
     let requested_page = Path::new(page_path_text);
     let requested_file = requested_page
         .file_name()
@@ -409,6 +632,107 @@ mod tests {
             result.pages[0].error.as_deref(),
             Some("The catalog page path is outside the Project Wiki.")
         );
+        remove_dir_all(root).expect("temporary root should be removed");
+    }
+
+    #[test]
+    fn resolves_zread_current_pointer_without_using_the_cli() {
+        let root = temporary_root("zread-current");
+        let wiki_root = root.join(".zread/wiki");
+        let version_root = wiki_root.join("versions/v2");
+        create_dir_all(&version_root).expect("Zread version directory should be created");
+        write(wiki_root.join("current"), b"versions/v2\n")
+            .expect("current pointer should be written");
+        write(
+            version_root.join("wiki.json"),
+            br#"{"id":"v2","language":"zh","providerMeta":{"opaque":"kept"},"pages":[{"slug":"overview","title":"Overview","file":"overview.md","section":"Start","sourceRefs":["src/main.ts"]}]}"#,
+        )
+        .expect("Zread catalog should be written");
+        write(version_root.join("overview.md"), b"# Version two").expect("page should be written");
+
+        let result =
+            read_zread_wiki_from_root(&root).expect("current Zread version should be readable");
+        assert_eq!(result.provider, "zread");
+        assert_eq!(result.status, "readable");
+        assert_eq!(result.current_pointer.as_deref(), Some("versions/v2"));
+        assert_eq!(result.version_id.as_deref(), Some("v2"));
+        assert_eq!(result.pages[0].content.as_deref(), Some("# Version two"));
+        assert_eq!(result.pages[0].associated_files, vec!["src/main.ts"]);
+        assert_eq!(result.catalog.native["providerMeta"]["opaque"], "kept");
+        remove_dir_all(root).expect("temporary root should be removed");
+    }
+
+    #[test]
+    fn rejects_invalid_zread_current_pointer_without_falling_back() {
+        let root = temporary_root("zread-pointer");
+        let wiki_root = root.join(".zread/wiki");
+        let old_version = wiki_root.join("versions/old");
+        create_dir_all(&old_version).expect("old version directory should be created");
+        write(wiki_root.join("current"), b"../versions/old\n")
+            .expect("invalid current pointer should be written");
+        write(
+            old_version.join("wiki.json"),
+            br#"{"pages":[{"slug":"old","title":"Old","file":"old.md"}]}"#,
+        )
+        .expect("old catalog should be written");
+        write(old_version.join("old.md"), b"old").expect("old page should be written");
+
+        let error = match read_zread_wiki_from_root(&root) {
+            Ok(_) => panic!("invalid pointer must fail"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "wiki_invalid");
+        assert!(error.message.contains("current pointer"));
+        remove_dir_all(root).expect("temporary root should be removed");
+    }
+
+    #[test]
+    fn rejects_a_missing_zread_current_version_instead_of_using_an_old_version() {
+        let root = temporary_root("zread-missing-version");
+        let wiki_root = root.join(".zread/wiki");
+        let old_version = wiki_root.join("versions/old");
+        create_dir_all(&old_version).expect("old version directory should be created");
+        write(wiki_root.join("current"), b"versions/missing")
+            .expect("current pointer should be written");
+        write(
+            old_version.join("wiki.json"),
+            br#"{"pages":[{"slug":"old","title":"Old","file":"old.md"}]}"#,
+        )
+        .expect("old catalog should be written");
+        write(old_version.join("old.md"), b"old").expect("old page should be written");
+
+        let error = match read_zread_wiki_from_root(&root) {
+            Ok(_) => panic!("missing current version must fail"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "wiki_invalid");
+        assert!(error.message.contains("versions/missing"));
+        remove_dir_all(root).expect("temporary root should be removed");
+    }
+
+    #[test]
+    fn reads_the_version_selected_after_current_pointer_switch() {
+        let root = temporary_root("zread-switch");
+        let wiki_root = root.join(".zread/wiki");
+        let first = wiki_root.join("versions/first");
+        let second = wiki_root.join("versions/second");
+        create_dir_all(&first).expect("first version should be created");
+        create_dir_all(&second).expect("second version should be created");
+        for (version, text) in [("first", "first content"), ("second", "second content")] {
+            let version_root = wiki_root.join(format!("versions/{version}"));
+            write(
+                version_root.join("wiki.json"),
+                format!(r#"{{"id":"{version}","pages":[{{"slug":"page","title":"Page","file":"page.md"}}]}}"#),
+            )
+            .expect("catalog should be written");
+            write(version_root.join("page.md"), text).expect("page should be written");
+        }
+        write(wiki_root.join("current"), b"versions/second")
+            .expect("current pointer should be written");
+
+        let result = read_zread_wiki_from_root(&root).expect("selected version should be readable");
+        assert_eq!(result.version_id.as_deref(), Some("second"));
+        assert_eq!(result.pages[0].content.as_deref(), Some("second content"));
         remove_dir_all(root).expect("temporary root should be removed");
     }
 

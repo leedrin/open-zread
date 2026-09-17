@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type ElementType } from 'react';
-import type { HubApplicationService } from '../lib/application-service';
-import type { HubOpenZreadWiki, HubProject, HubWikiPage } from '@open-zread/hub-contract';
+import type { HubProject, HubSourceFile, HubWikiAsset, HubWikiDocument, HubWikiPage } from '@open-zread/hub-contract';
 
 interface OpenZreadReaderProps {
   project: HubProject;
-  wiki: HubOpenZreadWiki;
-  service: HubApplicationService;
+  wiki: HubWikiDocument;
+  providerLabel: string;
+  readSource: (projectId: string, path: string) => Promise<HubSourceFile>;
+  readAsset: (projectId: string, pagePath: string, assetPath: string) => Promise<HubWikiAsset>;
   onClose: () => void;
 }
 
@@ -107,7 +108,7 @@ function InlineMarkdown({
   onNavigate,
 }: {
   text: string;
-  wiki: HubOpenZreadWiki;
+  wiki: HubWikiDocument;
   loadedImages: Record<string, string>;
   onNavigate: (page: HubWikiPage) => void;
 }) {
@@ -156,13 +157,13 @@ function MarkdownContent({
   page,
   wiki,
   project,
-  service,
+  readAsset,
   onNavigate,
 }: {
   page: HubWikiPage;
-  wiki: HubOpenZreadWiki;
+  wiki: HubWikiDocument;
   project: HubProject;
-  service: HubApplicationService;
+  readAsset: (projectId: string, pagePath: string, assetPath: string) => Promise<HubWikiAsset>;
   onNavigate: (page: HubWikiPage) => void;
 }) {
   const [loadedImages, setLoadedImages] = useState<Record<string, string>>({});
@@ -177,7 +178,7 @@ function MarkdownContent({
       const entries: Array<[string, string]> = [];
       for (const reference of references) {
         try {
-          const asset = await service.readOpenZreadAsset(project.id, pagePath(page), reference);
+          const asset = await readAsset(project.id, pagePath(page), reference);
           const objectUrl = URL.createObjectURL(new Blob([new Uint8Array(asset.bytes)], { type: asset.mimeType }));
           objectUrls.push(objectUrl);
           entries.push([reference, objectUrl]);
@@ -195,7 +196,7 @@ function MarkdownContent({
       active = false;
       objectUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
     };
-  }, [page, project.id, references, service]);
+  }, [page, project.id, readAsset, references]);
 
   const blocks = useMemo(() => parseMarkdownBlocks(page.content ?? ''), [page.content]);
   return (
@@ -227,7 +228,7 @@ function MarkdownContent({
   );
 }
 
-export function OpenZreadReader({ project, wiki, service, onClose }: OpenZreadReaderProps) {
+export function OpenZreadReader({ project, wiki, providerLabel, readSource, readAsset, onClose }: OpenZreadReaderProps) {
   const readablePages = wiki.pages.filter((page) => page.status === 'readable');
   const [selectedSlug, setSelectedSlug] = useState(readablePages[0]?.slug ?? wiki.pages[0]?.slug ?? '');
   const [sourceState, setSourceState] = useState<{ path: string; content: string } | null>(null);
@@ -245,7 +246,7 @@ export function OpenZreadReader({ project, wiki, service, onClose }: OpenZreadRe
     setSourceLoading(path);
     setSourceError(null);
     try {
-      setSourceState(await service.readOpenZreadSource(project.id, path));
+      setSourceState(await readSource(project.id, path));
     } catch (error) {
       setSourceError(error instanceof Error ? error.message : 'The associated source could not be read.');
     } finally {
@@ -254,13 +255,18 @@ export function OpenZreadReader({ project, wiki, service, onClose }: OpenZreadRe
   };
 
   return (
-    <section className="wiki-reader" data-testid="open-zread-reader" aria-labelledby="open-zread-reader-title">
+    <section
+      className="wiki-reader"
+      data-testid={wiki.provider === 'zread' ? 'zread-reader' : 'open-zread-reader'}
+      aria-labelledby="wiki-reader-title"
+    >
       <div className="wiki-reader-header">
         <div>
-          <p className="eyebrow">OPENZREAD WIKI</p>
-          <h2 id="open-zread-reader-title">{project.name}</h2>
+          <p className="eyebrow">{providerLabel}</p>
+          <h2 id="wiki-reader-title">{project.name}</h2>
           <p className="wiki-reader-meta">
             {wiki.catalog.language ?? 'unknown language'} · {wiki.pages.length} pages · {wiki.status}
+            {wiki.currentPointer ? ` · ${wiki.currentPointer}` : ''}
           </p>
         </div>
         <button type="button" className="secondary-button" onClick={onClose}>Close Reader</button>
@@ -271,7 +277,7 @@ export function OpenZreadReader({ project, wiki, service, onClose }: OpenZreadRe
         </p>
       )}
       <div className="wiki-reader-layout">
-        <nav className="wiki-reader-pages" aria-label="OpenZread pages">
+        <nav className="wiki-reader-pages" aria-label={`${providerLabel} pages`}>
           {wiki.pages.map((page) => (
             <button
               key={page.slug}
@@ -300,7 +306,7 @@ export function OpenZreadReader({ project, wiki, service, onClose }: OpenZreadRe
                   page={selectedPage}
                   wiki={wiki}
                   project={project}
-                  service={service}
+                  readAsset={readAsset}
                   onNavigate={navigateToPage}
                 />
               ) : (

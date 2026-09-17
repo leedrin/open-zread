@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { HubOpenZreadWiki } from '@open-zread/hub-contract';
+import type { HubOpenZreadWiki, HubZreadWiki } from '@open-zread/hub-contract';
 import {
   createHubApplicationService,
   type HubTransport,
@@ -57,6 +57,13 @@ const wikiPayload: HubOpenZreadWiki = {
   ],
 };
 
+const zreadPayload: HubZreadWiki = {
+  ...wikiPayload,
+  provider: 'zread',
+  currentPointer: 'versions/2026-09-17-120000',
+  versionId: '2026-09-17-120000',
+};
+
 describe('OpenZread Reader application-service interface', () => {
   test('reads a partial Wiki while preserving catalog and page native fields', async () => {
     const commands: Array<{ command: string; args?: Record<string, unknown> }> = [];
@@ -112,5 +119,45 @@ describe('OpenZread Reader application-service interface', () => {
     await expect(service.readOpenZreadAsset('project-1', '', 'diagram.png'))
       .rejects.toMatchObject({ code: 'invalid_request' });
     expect(calls).toEqual([]);
+  });
+
+  test('reads Zread through the same normalized Wiki model and preserves current version metadata', async () => {
+    const commands: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const service = createHubApplicationService(createTransport({
+      read_hub_zread_wiki: zreadPayload,
+      read_hub_zread_source: { path: 'src/main.ts', content: '' },
+      read_hub_zread_asset: { path: 'images/diagram.png', mimeType: 'image/png', bytes: [1, 2, 3] },
+    }, commands));
+
+    await expect(service.readZreadWiki(' project-1 ')).resolves.toEqual(zreadPayload);
+    await expect(service.readZreadSource('project-1', ' src/main.ts ')).resolves.toEqual({
+      path: 'src/main.ts',
+      content: '',
+    });
+    await expect(service.readZreadAsset('project-1', 'Start/overview.md', 'images/diagram.png'))
+      .resolves.toEqual({
+        path: 'images/diagram.png',
+        mimeType: 'image/png',
+        bytes: [1, 2, 3],
+      });
+    expect(commands).toEqual([
+      { command: 'read_hub_zread_wiki', args: { projectId: 'project-1' } },
+      { command: 'read_hub_zread_source', args: { projectId: 'project-1', path: 'src/main.ts' } },
+      {
+        command: 'read_hub_zread_asset',
+        args: { projectId: 'project-1', pagePath: 'Start/overview.md', assetPath: 'images/diagram.png' },
+      },
+    ]);
+  });
+
+  test('rejects malformed Zread current-version metadata at the IPC boundary', async () => {
+    const service = createHubApplicationService(createTransport({
+      read_hub_zread_wiki: { ...zreadPayload, currentPointer: 42 },
+    }, []));
+
+    await expect(service.readZreadWiki('project-1')).rejects.toMatchObject({
+      name: 'HubProtocolError',
+      code: 'internal_error',
+    });
   });
 });

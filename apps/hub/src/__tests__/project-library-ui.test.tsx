@@ -21,7 +21,7 @@ const firstProject: HubProject = {
   previousPaths: [],
   sourceControl: 'git',
   availability: 'available',
-  wiki: { openZread: 'readable', zread: 'missing' },
+  wiki: { openZread: 'readable', zread: 'readable' },
   favorite: false,
 };
 
@@ -104,6 +104,35 @@ function createLibraryService(
       }
       if (command === 'read_hub_open_zread_source') {
         return { path: 'src/main.ts', content: 'export const main = true;\n' };
+      }
+      if (command === 'read_hub_zread_wiki') {
+        return {
+          provider: 'zread',
+          status: 'readable',
+          currentPointer: 'versions/2026-09-17-120000',
+          versionId: '2026-09-17-120000',
+          catalog: {
+            id: '2026-09-17-120000',
+            generatedAt: '2026-09-17T12:00:00.000Z',
+            language: 'zh',
+            native: { providerMeta: { source: 'zread' } },
+          },
+          pages: [
+            {
+              slug: 'overview',
+              title: 'Zread 概览',
+              file: 'overview.md',
+              section: 'Start',
+              associatedFiles: [],
+              status: 'readable',
+              content: '# Zread 当前版本',
+              native: { source: 'zread' },
+            },
+          ],
+        };
+      }
+      if (command === 'read_hub_zread_source') {
+        return { path: 'src/main.ts', content: 'export const zread = true;\n' };
       }
       if (command === 'remove_hub_project') {
         projects = projects.filter((project) => project.id !== args?.projectId);
@@ -240,6 +269,30 @@ describe('Project Library UI', () => {
     });
     expect(renderer?.root.findByProps({ 'data-testid': 'source-content-text' }).children.join(' '))
       .toContain('export const main = true;');
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  test('opens the Zread Reader from the current version pointer through the shared Reader surface', async () => {
+    const service = createLibraryService([], []);
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(<HubApp service={service} />);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'open-zread-project-1' }).props.onClick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(renderer?.root.findByProps({ 'data-testid': 'zread-reader' })).toBeDefined();
+    expect(renderer?.root.findByProps({ 'data-testid': 'wiki-page-overview' })).toBeDefined();
+    expect(renderer?.root.findByProps({ className: 'wiki-reader-meta' }).children.join(' '))
+      .toContain('versions/2026-09-17-120000');
 
     await act(async () => {
       renderer?.unmount();
