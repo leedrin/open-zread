@@ -896,20 +896,23 @@ pub(crate) fn update_metadata(
         }
         return Err(write_error);
     }
-    if location.provider == "open_zread" && moved {
-        let mut history_entries = vec![(old_relative_path, Some(old_content))];
-        for (path, before, _) in &link_updates {
-            let relative = path
-                .strip_prefix(&location.wiki_root)
-                .ok()
-                .map(|value| value.to_string_lossy().replace('\\', "/"));
-            if let Some(relative) = relative {
-                if relative != history_entries[0].0 {
-                    history_entries.push((relative, Some(before.clone())));
+    if location.provider == "open_zread" {
+        let mut history_entries = Vec::new();
+        if moved {
+            history_entries.push((old_relative_path, Some(old_content)));
+            for (path, before, _) in &link_updates {
+                let relative = path
+                    .strip_prefix(&location.wiki_root)
+                    .ok()
+                    .map(|value| value.to_string_lossy().replace('\\', "/"));
+                if let Some(relative) = relative {
+                    if relative != history_entries[0].0 {
+                        history_entries.push((relative, Some(before.clone())));
+                    }
                 }
             }
+            history_entries.push((next_relative.clone(), None));
         }
-        history_entries.push((next_relative.clone(), None));
         let _ = record_open_zread_structure_snapshot(
             &root,
             &Uuid::new_v4().to_string(),
