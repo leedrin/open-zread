@@ -227,6 +227,18 @@ pub struct HubWikiChangeSet {
     pub created_at: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiHistoryEntry {
+    pub id: String,
+    pub project_id: String,
+    pub provider: &'static str,
+    pub label: String,
+    pub created_at: String,
+    pub current: bool,
+    pub page_count: u32,
+}
+
 pub const TASK_EVENT: &str = "hub://task-event";
 
 #[cfg(test)]

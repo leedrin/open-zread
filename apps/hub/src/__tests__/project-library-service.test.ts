@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { HubProject, HubTask, HubWikiChangeSet } from '@open-zread/hub-contract';
+import type { HubProject, HubTask, HubWikiChangeSet, HubWikiHistoryEntry } from '@open-zread/hub-contract';
 import {
   createHubApplicationService,
   type HubTransport,
@@ -47,6 +47,16 @@ const changeSet: HubWikiChangeSet = {
   after: '# After',
   status: 'preview',
   createdAt: '1720000000000',
+};
+
+const historyEntry: HubWikiHistoryEntry = {
+  id: 'change-1',
+  projectId: project.id,
+  provider: 'open_zread',
+  label: 'OpenZread change change-1',
+  createdAt: '1720000000000',
+  current: false,
+  pageCount: 1,
 };
 
 function createTransport(
@@ -132,12 +142,16 @@ describe('Project Library application-service interface', () => {
       start_hub_zread_task: zreadTask,
       preview_hub_wiki_change: changeSet,
       apply_hub_wiki_change: { ...changeSet, status: 'applied' },
+      list_hub_wiki_history: [historyEntry],
+      restore_hub_wiki_history: historyEntry,
     }, [], calls));
 
     await expect(service.startOpenZreadTask(project.id, 'generate')).resolves.toEqual(task);
     await expect(service.startZreadTask(project.id)).resolves.toEqual(zreadTask);
     await expect(service.previewWikiChange(project.id, 'open_zread', 'overview', '# After')).resolves.toEqual(changeSet);
     await expect(service.applyWikiChange(changeSet.changeSetId)).resolves.toMatchObject({ status: 'applied' });
+    await expect(service.listWikiHistory(project.id, 'open_zread')).resolves.toEqual([historyEntry]);
+    await expect(service.restoreWikiHistory(project.id, 'open_zread', historyEntry.id)).resolves.toEqual(historyEntry);
     expect(calls).toEqual([
       { command: 'start_hub_open_zread_task', args: { projectId: project.id, operation: 'generate' } },
       { command: 'start_hub_zread_task', args: { projectId: project.id } },
@@ -146,6 +160,11 @@ describe('Project Library application-service interface', () => {
         args: { projectId: project.id, provider: 'open_zread', slug: 'overview', content: '# After' },
       },
       { command: 'apply_hub_wiki_change', args: { changeSetId: changeSet.changeSetId } },
+      { command: 'list_hub_wiki_history', args: { projectId: project.id, provider: 'open_zread' } },
+      {
+        command: 'restore_hub_wiki_history',
+        args: { projectId: project.id, provider: 'open_zread', historyId: historyEntry.id },
+      },
     ]);
   });
 

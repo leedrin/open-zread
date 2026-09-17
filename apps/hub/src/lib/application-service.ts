@@ -28,6 +28,7 @@ import {
   type HubTask,
   type HubOpenZreadOperation,
   type HubWikiChangeSet,
+  type HubWikiHistoryEntry,
   type RegisterProjectResponse,
 } from '@open-zread/hub-contract';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
@@ -73,6 +74,8 @@ export interface HubApplicationService {
   startZreadTask(projectId: string): Promise<HubTask>;
   previewWikiChange(projectId: string, provider: HubWikiProvider, slug: string, content: string): Promise<HubWikiChangeSet>;
   applyWikiChange(changeSetId: string): Promise<HubWikiChangeSet>;
+  listWikiHistory(projectId: string, provider: HubWikiProvider): Promise<HubWikiHistoryEntry[]>;
+  restoreWikiHistory(projectId: string, provider: HubWikiProvider, historyId: string): Promise<HubWikiHistoryEntry>;
   cancelTask(taskId: string): Promise<CancelTaskResponse>;
   subscribeToTaskEvents(listener: (event: HubTaskEvent) => void): Promise<Unsubscribe>;
 }
@@ -555,6 +558,24 @@ function parseChangeSet(value: unknown): HubWikiChangeSet {
   };
 }
 
+function parseHistoryEntry(value: unknown): HubWikiHistoryEntry {
+  if (!isRecord(value) || (value.provider !== 'open_zread' && value.provider !== 'zread')) {
+    throw new HubProtocolError('Invalid Hub response: history entry is malformed.');
+  }
+  if (typeof value.current !== 'boolean' || typeof value.pageCount !== 'number' || !Number.isFinite(value.pageCount)) {
+    throw new HubProtocolError('Invalid Hub response: history entry metadata is malformed.');
+  }
+  return {
+    id: requiredString(value.id, 'id'),
+    projectId: requiredString(value.projectId, 'projectId'),
+    provider: value.provider,
+    label: requiredString(value.label, 'label'),
+    createdAt: requiredString(value.createdAt, 'createdAt'),
+    current: value.current,
+    pageCount: value.pageCount,
+  };
+}
+
 /**
  * Create the typed client used by React and future Tauri command adapters.
  * React never receives a filesystem or process capability from this boundary.
@@ -798,6 +819,35 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.applyWikiChange, {
         changeSetId: normalizedId,
       }).then(parseChangeSet);
+    },
+
+    listWikiHistory(projectId, provider) {
+      const normalizedId = projectId.trim();
+      if (!normalizedId) {
+        return invalidRequest('Project id is required.');
+      }
+      return transport.invoke(HUB_COMMANDS.listWikiHistory, {
+        projectId: normalizedId,
+        provider,
+      }).then((value) => {
+        if (!Array.isArray(value)) {
+          throw new HubProtocolError('Invalid Hub response: history is not a list.');
+        }
+        return value.map(parseHistoryEntry);
+      });
+    },
+
+    restoreWikiHistory(projectId, provider, historyId) {
+      const normalizedId = projectId.trim();
+      const normalizedHistoryId = historyId.trim();
+      if (!normalizedId || !normalizedHistoryId) {
+        return invalidRequest('Project id and history id are required.');
+      }
+      return transport.invoke(HUB_COMMANDS.restoreWikiHistory, {
+        projectId: normalizedId,
+        provider,
+        historyId: normalizedHistoryId,
+      }).then(parseHistoryEntry);
     },
 
     cancelTask(taskId) {

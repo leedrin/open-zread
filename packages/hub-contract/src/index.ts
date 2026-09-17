@@ -12,6 +12,8 @@ export const HUB_COMMANDS = {
   startZreadTask: 'start_hub_zread_task',
   previewWikiChange: 'preview_hub_wiki_change',
   applyWikiChange: 'apply_hub_wiki_change',
+  listWikiHistory: 'list_hub_wiki_history',
+  restoreWikiHistory: 'restore_hub_wiki_history',
   cancelTask: 'cancel_hub_task',
   listProjects: 'list_hub_projects',
   registerProject: 'register_hub_project',
@@ -220,6 +222,16 @@ export interface HubWikiChangeSet {
   after: string;
   status: HubChangeSetStatus;
   createdAt: string;
+}
+
+export interface HubWikiHistoryEntry {
+  id: string;
+  projectId: string;
+  provider: HubWikiProvider;
+  label: string;
+  createdAt: string;
+  current: boolean;
+  pageCount: number;
 }
 
 export const HUB_TASK_KINDS = ['generation', 'update', 'maintenance'] as const;

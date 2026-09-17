@@ -2,7 +2,7 @@ use crate::contracts::{
     CancelTaskResponse, HubCommandError, HubHealth, HubOpenZreadWiki, HubProject,
     HubProviderCapabilities, HubProviderContentHealth, HubProviderGeneratorHealth,
     HubProviderHealth, HubRunnerInfo, HubServiceHealth, HubSourceFile, HubTask, HubTaskEvent,
-    HubWikiAsset, HubWikiChangeSet, RegisterProjectResponse, TASK_EVENT,
+    HubWikiAsset, HubWikiChangeSet, HubWikiHistoryEntry, RegisterProjectResponse, TASK_EVENT,
 };
 use crate::mutations::ChangeSetCoordinator;
 use crate::projects::{
@@ -636,6 +636,25 @@ pub fn apply_hub_wiki_change(
     change_set_id: String,
 ) -> Result<HubWikiChangeSet, HubCommandError> {
     crate::mutations::apply_change(&app, &coordinator, &change_set_id)
+}
+
+#[tauri::command]
+pub fn list_hub_wiki_history(
+    app: AppHandle,
+    project_id: String,
+    provider: String,
+) -> Result<Vec<HubWikiHistoryEntry>, HubCommandError> {
+    crate::history::list_history(&app, &project_id, &provider)
+}
+
+#[tauri::command]
+pub fn restore_hub_wiki_history(
+    app: AppHandle,
+    project_id: String,
+    provider: String,
+    history_id: String,
+) -> Result<HubWikiHistoryEntry, HubCommandError> {
+    crate::history::restore_history(&app, &project_id, &provider, &history_id)
 }
 
 #[tauri::command]

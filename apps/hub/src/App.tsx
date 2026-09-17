@@ -844,6 +844,9 @@ export function HubApp({ service = defaultService }: HubAppProps) {
             : service.readOpenZreadAsset(projectId, pagePath, assetPath)}
           previewChange={service.previewWikiChange}
           applyChange={service.applyWikiChange}
+          listHistory={service.listWikiHistory}
+          restoreHistory={service.restoreWikiHistory}
+          onHistoryRestored={() => void openWikiReader(readerState.project, readerState.wiki.provider)}
           onClose={() => setReaderState({ status: 'closed' })}
         />
       )}

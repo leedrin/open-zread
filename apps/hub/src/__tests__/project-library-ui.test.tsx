@@ -204,6 +204,28 @@ function createLibraryService(
           createdAt: '1720000000000',
         };
       }
+      if (command === 'list_hub_wiki_history') {
+        return [{
+          id: 'change-1',
+          projectId: firstProject.id,
+          provider: 'open_zread',
+          label: 'OpenZread change change-1',
+          createdAt: '1720000000000',
+          current: false,
+          pageCount: 1,
+        }];
+      }
+      if (command === 'restore_hub_wiki_history') {
+        return {
+          id: 'change-1',
+          projectId: firstProject.id,
+          provider: 'open_zread',
+          label: 'OpenZread change change-1',
+          createdAt: '1720000000000',
+          current: false,
+          pageCount: 1,
+        };
+      }
       if (command === 'read_hub_open_zread_source') {
         return { path: 'src/main.ts', content: 'export const main = true;\n' };
       }
@@ -441,6 +463,42 @@ describe('Project Library UI', () => {
     await act(async () => {
       renderer?.unmount();
     });
+  });
+
+  test('lists Wiki history from the Reader and restores an explicit snapshot', async () => {
+    const commands: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const service = createLibraryService(commands, []);
+    const originalConfirm = globalThis.confirm;
+    globalThis.confirm = () => true;
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(async () => {
+        renderer = create(<HubApp service={service} />);
+        await Promise.resolve();
+      });
+      await act(async () => {
+        renderer?.root.findByProps({ 'data-testid': 'open-open-zread-project-1' }).props.onClick();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      await act(async () => {
+        renderer?.root.findByProps({ 'data-testid': 'open-wiki-history' }).props.onClick();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(renderer?.root.findByProps({ 'data-testid': 'wiki-history' })).toBeDefined();
+      await act(async () => {
+        renderer?.root.findByProps({ className: 'wiki-history-entry' }).findByType('button').props.onClick();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(commands).toContainEqual({
+        command: 'restore_hub_wiki_history',
+        args: { projectId: firstProject.id, provider: 'open_zread', historyId: 'change-1' },
+      });
+    } finally {
+      globalThis.confirm = originalConfirm;
+      await act(async () => {
+        renderer?.unmount();
+      });
+    }
   });
 
   test('opens the Zread Reader from the current version pointer through the shared Reader surface', async () => {

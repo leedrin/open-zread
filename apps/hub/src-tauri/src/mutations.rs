@@ -1,4 +1,5 @@
 use crate::contracts::{HubCommandError, HubWikiChangeSet};
+use crate::history::record_open_zread_page;
 use crate::projects::{project_root, safe_page_path, safe_relative_path};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -303,6 +304,15 @@ pub(crate) fn apply_change(
             "The Wiki page path changed after preview.",
             true,
         ));
+    }
+    if pending.change_set.provider == "open_zread" {
+        record_open_zread_page(
+            &root,
+            change_set_id,
+            &pending.change_set.slug,
+            &pending.change_set.relative_path,
+            &pending.change_set.before,
+        )?;
     }
     write_with_recovery(
         &target,

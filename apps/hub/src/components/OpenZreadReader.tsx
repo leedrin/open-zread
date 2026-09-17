@@ -4,6 +4,7 @@ import type {
   HubSourceFile,
   HubWikiAsset,
   HubWikiChangeSet,
+  HubWikiHistoryEntry,
   HubWikiDocument,
   HubWikiPage,
   HubWikiProvider,
@@ -28,6 +29,9 @@ interface OpenZreadReaderProps {
   readAsset: (projectId: string, pagePath: string, assetPath: string) => Promise<HubWikiAsset>;
   previewChange: (projectId: string, provider: HubWikiProvider, slug: string, content: string) => Promise<HubWikiChangeSet>;
   applyChange: (changeSetId: string) => Promise<HubWikiChangeSet>;
+  listHistory: (projectId: string, provider: HubWikiProvider) => Promise<HubWikiHistoryEntry[]>;
+  restoreHistory: (projectId: string, provider: HubWikiProvider, historyId: string) => Promise<HubWikiHistoryEntry>;
+  onHistoryRestored: () => void;
   onClose: () => void;
 }
 
@@ -262,6 +266,9 @@ export function OpenZreadReader({
   readAsset,
   previewChange,
   applyChange,
+  listHistory,
+  restoreHistory,
+  onHistoryRestored,
   onClose,
 }: OpenZreadReaderProps) {
   const readablePages = wiki.pages.filter((page) => page.status === 'readable');
@@ -282,6 +289,10 @@ export function OpenZreadReader({
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [editedContent, setEditedContent] = useState<Record<string, string>>({});
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<HubWikiHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const articleRef = useRef<HTMLElement | null>(null);
   const selectedPage = wiki.pages.find((page) => page.slug === selectedSlug) ?? wiki.pages[0];
   const sections = useMemo(() => {
@@ -308,6 +319,9 @@ export function OpenZreadReader({
     setChangeSet(null);
     setEditError(null);
     setEditedContent({});
+    setHistoryOpen(false);
+    setHistoryEntries([]);
+    setHistoryError(null);
   }, [wiki.provider, wiki.currentPointer, wiki.versionId]);
 
   useEffect(() => {
@@ -399,6 +413,38 @@ export function OpenZreadReader({
     }
   };
 
+  const openHistory = async () => {
+    setHistoryOpen((current) => !current);
+    if (historyOpen) {
+      return;
+    }
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      setHistoryEntries(await listHistory(project.id, wiki.provider));
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : 'Unable to read Wiki history.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const restoreHistoryEntry = async (entry: HubWikiHistoryEntry) => {
+    if (!globalThis.confirm(`Restore ${entry.label}? The current page state will be replaced.`)) {
+      return;
+    }
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      await restoreHistory(project.id, wiki.provider, entry.id);
+      onHistoryRestored();
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : 'Unable to restore Wiki history.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   const displayPage = selectedPage && editedContent[selectedPage.slug] !== undefined
     ? { ...selectedPage, content: editedContent[selectedPage.slug] }
     : selectedPage;
@@ -439,6 +485,29 @@ export function OpenZreadReader({
             ))}
           </div>
         </div>
+      )}
+      <div className="wiki-reader-history-bar">
+        <button type="button" className="secondary-button" data-testid="open-wiki-history" onClick={() => void openHistory()}>
+          {historyOpen ? 'Hide history' : 'History & restore'}
+        </button>
+      </div>
+      {historyOpen && (
+        <section className="wiki-history" data-testid="wiki-history" aria-label="Wiki history">
+          {historyLoading && <p>Loading history…</p>}
+          {!historyLoading && historyEntries.length === 0 && <p>No restorable history is available.</p>}
+          {historyEntries.map((entry) => (
+            <div className="wiki-history-entry" key={entry.id}>
+              <div>
+                <strong>{entry.label}</strong>
+                <small>{entry.createdAt} · {entry.pageCount} page(s){entry.current ? ' · current' : ''}</small>
+              </div>
+              <button type="button" className="secondary-button" disabled={historyLoading || entry.current} onClick={() => void restoreHistoryEntry(entry)}>
+                Restore
+              </button>
+            </div>
+          ))}
+          {historyError && <p className="wiki-reader-page-error" role="alert">{historyError}</p>}
+        </section>
       )}
       {wiki.status === 'partial' && (
         <p className="wiki-reader-warning" role="status">

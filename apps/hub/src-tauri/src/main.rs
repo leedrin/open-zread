@@ -1,5 +1,6 @@
 mod commands;
 mod contracts;
+mod history;
 mod mutations;
 mod projects;
 mod reader;
@@ -18,6 +19,8 @@ fn main() {
             commands::start_hub_zread_task,
             commands::preview_hub_wiki_change,
             commands::apply_hub_wiki_change,
+            commands::list_hub_wiki_history,
+            commands::restore_hub_wiki_history,
             commands::cancel_hub_task,
             commands::list_hub_projects,
             commands::register_hub_project,
