@@ -2,18 +2,20 @@ use crate::contracts::{
     HubCommandError, HubWikiBatchMutationResponse, HubWikiPageMutationResponse,
 };
 use crate::history::record_open_zread_structure_snapshot;
-use crate::projects::{project_root, safe_page_path, safe_relative_path};
+use crate::mutations::{PreparedFileChange, PreparedStructureChange};
+use crate::projects::{safe_page_path, safe_relative_path};
+use crate::wiki_instances::resolve_provider_instance;
+use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use tauri::AppHandle;
 use uuid::Uuid;
 
-static WIKI_MUTATION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
 struct CatalogLocation {
     provider: &'static str,
+    wiki_id: String,
     wiki_root: PathBuf,
     catalog_path: PathBuf,
     flat_pages: bool,
@@ -26,6 +28,38 @@ pub(crate) struct CreatePageInput<'a> {
     pub group: Option<&'a str>,
     pub content: &'a str,
     pub associated_files: &'a [String],
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StructurePageInput {
+    slug: String,
+    title: String,
+    section: String,
+    group: Option<String>,
+    content: String,
+    associated_files: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub(crate) enum StructureChangeRequest {
+    Create {
+        pages: Vec<StructurePageInput>,
+    },
+    Delete {
+        slug: String,
+    },
+    Metadata {
+        slug: String,
+        new_slug: Option<String>,
+        title: Option<String>,
+        section: Option<String>,
+        group: Option<String>,
+        associated_files: Option<Vec<String>>,
+        order: Option<u32>,
+        clear_group: Option<bool>,
+    },
 }
 
 fn error(code: &'static str, message: impl Into<String>, retryable: bool) -> HubCommandError {
@@ -53,12 +87,17 @@ fn valid_relative(value: &str) -> bool {
             .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
 }
 
-fn location(root: &Path, provider: &str) -> Result<CatalogLocation, HubCommandError> {
+fn location(
+    root: &Path,
+    provider: &str,
+    wiki_id: &str,
+) -> Result<CatalogLocation, HubCommandError> {
     match provider {
         "open_zread" => {
             let wiki_root = root.join(".open-zread").join("wiki");
             Ok(CatalogLocation {
                 provider: "open_zread",
+                wiki_id: wiki_id.to_string(),
                 catalog_path: wiki_root.join("wiki.json"),
                 wiki_root,
                 flat_pages: false,
@@ -86,6 +125,7 @@ fn location(root: &Path, provider: &str) -> Result<CatalogLocation, HubCommandEr
             })?;
             Ok(CatalogLocation {
                 provider: "zread",
+                wiki_id: wiki_id.to_string(),
                 catalog_path: version_root.join("wiki.json"),
                 wiki_root: version_root,
                 flat_pages: true,
@@ -189,7 +229,7 @@ fn page_path(
     Ok((canonical_path, parts.join("/")))
 }
 
-fn verify_new_path_inside(root: &Path, target: &Path) -> Result<(), HubCommandError> {
+pub(crate) fn verify_new_path_inside(root: &Path, target: &Path) -> Result<(), HubCommandError> {
     if fs::symlink_metadata(target)
         .map(|metadata| metadata.file_type().is_symlink())
         .unwrap_or(false)
@@ -207,14 +247,14 @@ fn verify_new_path_inside(root: &Path, target: &Path) -> Result<(), HubCommandEr
             true,
         )
     })?;
-    let probe = if target.exists() {
-        target.to_path_buf()
-    } else {
-        target
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| target.to_path_buf())
-    };
+    let mut probe = target.to_path_buf();
+    while !probe.exists() {
+        let Some(parent) = probe.parent() else { break };
+        if parent == probe {
+            break;
+        }
+        probe = parent.to_path_buf();
+    }
     let canonical_probe = fs::canonicalize(probe).map_err(|_| {
         error(
             "wiki_not_found",
@@ -230,6 +270,140 @@ fn verify_new_path_inside(root: &Path, target: &Path) -> Result<(), HubCommandEr
         ));
     }
     Ok(())
+}
+
+fn planned_file(
+    location: &CatalogLocation,
+    relative_path: &str,
+    action: &'static str,
+    after: Option<Vec<u8>>,
+) -> Result<PreparedFileChange, HubCommandError> {
+    if !valid_relative(relative_path) {
+        return Err(error(
+            "source_invalid_path",
+            "A planned Wiki file path is invalid.",
+            false,
+        ));
+    }
+    let target = safe_page_path(&location.wiki_root, &[relative_path]).ok_or_else(|| {
+        error(
+            "source_invalid_path",
+            "A planned Wiki file path is invalid.",
+            false,
+        )
+    })?;
+    verify_new_path_inside(&location.wiki_root, &target)?;
+    let before = if target.exists() {
+        Some(fs::read(&target).map_err(|read_error| {
+            error(
+                "wiki_read_failed",
+                format!("Unable to read a planned Wiki file: {read_error}"),
+                true,
+            )
+        })?)
+    } else {
+        None
+    };
+    match (action, before.is_some()) {
+        ("create", true) => {
+            return Err(error(
+                "conflict",
+                format!("The Wiki target '{relative_path}' already exists."),
+                false,
+            ))
+        }
+        ("update" | "delete", false) => {
+            return Err(error(
+                "source_not_found",
+                format!("The Wiki target '{relative_path}' no longer exists."),
+                true,
+            ))
+        }
+        _ => {}
+    }
+    Ok(PreparedFileChange {
+        relative_path: relative_path.to_string(),
+        target,
+        action,
+        before,
+        after,
+    })
+}
+
+fn planned_catalog(
+    location: &CatalogLocation,
+    original_catalog: &[u8],
+    catalog: &Value,
+) -> Result<PreparedFileChange, HubCommandError> {
+    let after = serde_json::to_vec_pretty(catalog).map_err(|serialization_error| {
+        error("internal_error", serialization_error.to_string(), true)
+    })?;
+    let mut change = planned_file(location, "wiki.json", "update", Some(after))?;
+    if change.before.as_deref() != Some(original_catalog) {
+        return Err(error(
+            "conflict",
+            "The Wiki catalog changed during preview planning.",
+            true,
+        ));
+    }
+    change.before = Some(original_catalog.to_vec());
+    Ok(change)
+}
+
+fn structure_plan(
+    root: &Path,
+    location: &CatalogLocation,
+    original_catalog: Vec<u8>,
+    files: Vec<PreparedFileChange>,
+) -> Result<PreparedStructureChange, HubCommandError> {
+    let (pointer_path, pointer_before) = if location.provider == "zread" {
+        let path = root.join(".zread").join("wiki").join("current");
+        let contents = fs::read(&path).map_err(|_| {
+            error(
+                "wiki_invalid",
+                "The Zread current pointer could not be read.",
+                true,
+            )
+        })?;
+        let pointer = String::from_utf8_lossy(&contents)
+            .trim_start_matches('\u{feff}')
+            .trim()
+            .to_string();
+        if !safe_relative_path(&pointer) {
+            return Err(error(
+                "wiki_invalid",
+                "The Zread current pointer is invalid.",
+                false,
+            ));
+        }
+        let active_root = safe_page_path(&root.join(".zread").join("wiki"), &[&pointer])
+            .ok_or_else(|| {
+                error(
+                    "wiki_invalid",
+                    "The Zread current pointer escapes its Wiki root.",
+                    false,
+                )
+            })?;
+        if fs::canonicalize(active_root).ok() != fs::canonicalize(&location.wiki_root).ok() {
+            return Err(error(
+                "conflict",
+                "The Zread current version changed while preparing the preview.",
+                true,
+            ));
+        }
+        (Some(path), Some(contents))
+    } else {
+        (None, None)
+    };
+    Ok(PreparedStructureChange {
+        root: root.to_path_buf(),
+        wiki_root: location.wiki_root.clone(),
+        catalog_path: location.catalog_path.clone(),
+        catalog_before: original_catalog,
+        pointer_path,
+        pointer_before,
+        files,
+    })
 }
 
 fn collect_markdown_files(
@@ -391,10 +565,447 @@ fn response(
     HubWikiPageMutationResponse {
         project_id: project_id.to_string(),
         provider: location.provider,
+        wiki_id: location.wiki_id.clone(),
         slug: slug.to_string(),
         action,
         relative_path,
     }
+}
+
+pub(crate) fn preview_structure_change(
+    app: &AppHandle,
+    coordinator: &tauri::State<'_, crate::mutations::ChangeSetCoordinator>,
+    project_id: &str,
+    provider: &str,
+    wiki_id: Option<&str>,
+    request: StructureChangeRequest,
+) -> Result<crate::contracts::HubWikiChangeSet, HubCommandError> {
+    let _guard = crate::mutations::WIKI_MUTATION_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .map_err(|_| error("internal_error", "Wiki mutation lock is unavailable.", true))?;
+    let project_id = project_id.trim();
+    if project_id.is_empty() {
+        return Err(error("invalid_request", "Project id is required.", false));
+    }
+    let instance = resolve_provider_instance(app, project_id, provider, wiki_id)?;
+    let root = instance.source_root;
+    let wiki_id = instance.wiki_id;
+    let location = location(&root, provider, &wiki_id)?;
+    let (original_catalog, mut catalog) = read_catalog(&location)?;
+    let mut files = Vec::<PreparedFileChange>::new();
+    let mut warnings = Vec::new();
+    let mut checks = vec![
+        "Provider 当前目录与版本指针已解析".to_string(),
+        "所有目标路径均限制在当前 Wiki 根目录内".to_string(),
+    ];
+    let (operation, slug, primary_path) = match request {
+        StructureChangeRequest::Create { pages } => {
+            if pages.is_empty() {
+                return Err(error(
+                    "invalid_request",
+                    "At least one Wiki page is required.",
+                    false,
+                ));
+            }
+            let mut new_slugs = Vec::new();
+            for page in &pages {
+                if !valid_component(&page.slug)
+                    || page.title.trim().is_empty()
+                    || !valid_component(&page.section)
+                {
+                    return Err(error(
+                        "invalid_request",
+                        "Page slug, title, and section are invalid.",
+                        false,
+                    ));
+                }
+                if page
+                    .associated_files
+                    .iter()
+                    .any(|path| !valid_relative(path))
+                {
+                    return Err(error(
+                        "source_invalid_path",
+                        "A SourceReference path is invalid.",
+                        false,
+                    ));
+                }
+                if new_slugs.contains(&page.slug.as_str()) {
+                    return Err(error(
+                        "conflict",
+                        format!("Page slug '{}' is duplicated in the batch.", page.slug),
+                        false,
+                    ));
+                }
+                new_slugs.push(page.slug.as_str());
+                if catalog
+                    .get("pages")
+                    .and_then(Value::as_array)
+                    .is_some_and(|existing| {
+                        existing.iter().any(|item| {
+                            item.get("slug").and_then(Value::as_str) == Some(&page.slug)
+                        })
+                    })
+                {
+                    return Err(error(
+                        "conflict",
+                        format!("Page slug '{}' already exists.", page.slug),
+                        false,
+                    ));
+                }
+                let file_name = format!("{}.md", page.slug);
+                let relative = if location.flat_pages {
+                    file_name.clone()
+                } else {
+                    format!("{}/{file_name}", page.section)
+                };
+                let target =
+                    safe_page_path(&location.wiki_root, &[&relative]).ok_or_else(|| {
+                        error(
+                            "source_invalid_path",
+                            "The new Wiki page path is invalid.",
+                            false,
+                        )
+                    })?;
+                verify_new_path_inside(&location.wiki_root, &target)?;
+                if target.exists() {
+                    return Err(error(
+                        "conflict",
+                        format!("The new page file '{relative}' already exists."),
+                        false,
+                    ));
+                }
+                files.push(planned_file(
+                    &location,
+                    &relative,
+                    "create",
+                    Some(page.content.as_bytes().to_vec()),
+                )?);
+                let mut entry = Map::new();
+                entry.insert("slug".to_string(), Value::String(page.slug.clone()));
+                entry.insert(
+                    "title".to_string(),
+                    Value::String(page.title.trim().to_string()),
+                );
+                entry.insert("file".to_string(), Value::String(file_name));
+                entry.insert("section".to_string(), Value::String(page.section.clone()));
+                if let Some(group) = page
+                    .group
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                {
+                    entry.insert("group".to_string(), Value::String(group.trim().to_string()));
+                }
+                entry.insert(
+                    "associatedFiles".to_string(),
+                    serde_json::to_value(&page.associated_files)
+                        .unwrap_or(Value::Array(Vec::new())),
+                );
+                entry.insert("status".to_string(), Value::String("new".to_string()));
+                catalog
+                    .get_mut("pages")
+                    .and_then(Value::as_array_mut)
+                    .expect("validated pages array")
+                    .push(Value::Object(entry));
+            }
+            let primary = files
+                .first()
+                .map(|file| file.relative_path.clone())
+                .unwrap_or_default();
+            files.push(planned_catalog(&location, &original_catalog, &catalog)?);
+            checks.push(format!(
+                "{} 个 slug、目标文件和关联源码路径通过校验",
+                pages.len()
+            ));
+            (
+                if pages.len() == 1 {
+                    "create"
+                } else {
+                    "batch_create"
+                },
+                pages[0].slug.clone(),
+                primary,
+            )
+        }
+        StructureChangeRequest::Delete { slug } => {
+            let slug = slug.trim();
+            if slug.is_empty() {
+                return Err(error("invalid_request", "Page slug is required.", false));
+            }
+            let index = find_page_index(&catalog, slug)?;
+            let page = catalog
+                .get("pages")
+                .and_then(Value::as_array)
+                .and_then(|items| items.get(index))
+                .and_then(Value::as_object)
+                .cloned()
+                .ok_or_else(|| error("wiki_invalid", "The Wiki page entry is invalid.", false))?;
+            let (target, relative_path) = page_path(&location, &page)?;
+            let mut reference_files = Vec::new();
+            let mut markdown_files = Vec::new();
+            collect_markdown_files(&location.wiki_root, &mut markdown_files)?;
+            let basename = Path::new(&relative_path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
+            for path in markdown_files {
+                if path == target {
+                    continue;
+                }
+                let content = fs::read_to_string(&path).map_err(|read_error| {
+                    error("wiki_read_failed", read_error.to_string(), true)
+                })?;
+                let patterns = [
+                    format!("]({relative_path})"),
+                    format!("](./{relative_path})"),
+                    format!("]({basename})"),
+                    format!("](./{basename})"),
+                ];
+                if patterns.iter().any(|pattern| content.contains(pattern)) {
+                    if let Ok(relative) = path.strip_prefix(&location.wiki_root) {
+                        reference_files.push(relative.to_string_lossy().replace('\\', "/"));
+                    }
+                }
+            }
+            catalog
+                .get_mut("pages")
+                .and_then(Value::as_array_mut)
+                .expect("validated pages array")
+                .remove(index);
+            files.push(planned_file(&location, &relative_path, "delete", None)?);
+            files.push(planned_catalog(&location, &original_catalog, &catalog)?);
+            if !reference_files.is_empty() {
+                reference_files.sort();
+                warnings.push(format!(
+                    "删除后以下 {} 个 Wiki 文件中的内部链接会失效：{}",
+                    reference_files.len(),
+                    reference_files.join("、")
+                ));
+            }
+            checks.push("删除目标存在且当前内容已纳入修订校验".to_string());
+            ("delete", slug.to_string(), relative_path)
+        }
+        StructureChangeRequest::Metadata {
+            slug,
+            new_slug,
+            title,
+            section,
+            group,
+            associated_files,
+            order,
+            clear_group,
+        } => {
+            let slug = slug.trim();
+            if slug.is_empty() {
+                return Err(error("invalid_request", "Page slug is required.", false));
+            }
+            let index = find_page_index(&catalog, slug)?;
+            let pages = catalog
+                .get("pages")
+                .and_then(Value::as_array)
+                .expect("validated pages array");
+            let page_snapshot = pages
+                .get(index)
+                .and_then(Value::as_object)
+                .cloned()
+                .ok_or_else(|| error("wiki_invalid", "The Wiki page entry is invalid.", false))?;
+            let old_file = page_snapshot
+                .get("file")
+                .and_then(Value::as_str)
+                .filter(|value| valid_relative(value))
+                .ok_or_else(|| error("wiki_invalid", "The Wiki page file path is invalid.", false))?
+                .to_string();
+            let old_section = page_snapshot
+                .get("section")
+                .and_then(Value::as_str)
+                .unwrap_or("Uncategorized")
+                .to_string();
+            let next_slug = new_slug.as_deref().unwrap_or(slug);
+            let next_section = section.as_deref().unwrap_or(&old_section);
+            if !valid_component(next_slug) || !valid_component(next_section) {
+                return Err(error(
+                    "invalid_request",
+                    "The new slug or section is invalid.",
+                    false,
+                ));
+            }
+            if associated_files
+                .as_ref()
+                .is_some_and(|items| items.iter().any(|path| !valid_relative(path)))
+            {
+                return Err(error(
+                    "source_invalid_path",
+                    "A SourceReference path is invalid.",
+                    false,
+                ));
+            }
+            if next_slug != slug
+                && pages
+                    .iter()
+                    .any(|item| item.get("slug").and_then(Value::as_str) == Some(next_slug))
+            {
+                return Err(error(
+                    "conflict",
+                    format!("Page slug '{next_slug}' already exists."),
+                    false,
+                ));
+            }
+            let (old_target, old_relative) = page_path(&location, &page_snapshot)?;
+            let next_file = if next_slug != slug {
+                format!("{next_slug}.md")
+            } else {
+                old_file.clone()
+            };
+            let next_relative = if location.flat_pages {
+                next_file.clone()
+            } else {
+                format!("{next_section}/{next_file}")
+            };
+            let next_target =
+                safe_page_path(&location.wiki_root, &[&next_relative]).ok_or_else(|| {
+                    error(
+                        "source_invalid_path",
+                        "The new Wiki page path is invalid.",
+                        false,
+                    )
+                })?;
+            let moved = old_target != next_target;
+            if moved {
+                verify_new_path_inside(&location.wiki_root, &next_target)?;
+                if next_target.exists() {
+                    return Err(error(
+                        "conflict",
+                        "The destination Wiki page path already exists.",
+                        false,
+                    ));
+                }
+            }
+            let old_content = fs::read(&old_target)
+                .map_err(|read_error| error("wiki_read_failed", read_error.to_string(), true))?;
+            let link_changes = link_updates(
+                &location.wiki_root,
+                &old_relative,
+                &next_relative,
+                &old_file,
+                &next_file,
+            )?;
+            let mut moved_content = String::from_utf8(old_content.clone())
+                .map_err(|_| error("wiki_invalid", "The Wiki page is not valid UTF-8.", false))?;
+            for (path, before, after) in &link_changes {
+                if path == &old_target {
+                    moved_content = after.clone();
+                } else {
+                    let relative = path
+                        .strip_prefix(&location.wiki_root)
+                        .map_err(|_| {
+                            error(
+                                "wiki_invalid",
+                                "A linked Wiki file escapes its root.",
+                                false,
+                            )
+                        })?
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    let mut change = planned_file(
+                        &location,
+                        &relative,
+                        "update",
+                        Some(after.as_bytes().to_vec()),
+                    )?;
+                    if change.before.as_deref() != Some(before.as_bytes()) {
+                        return Err(error(
+                            "conflict",
+                            "A linked Wiki page changed during preview planning.",
+                            true,
+                        ));
+                    }
+                    change.before = Some(before.as_bytes().to_vec());
+                    files.push(change);
+                }
+            }
+            {
+                let pages = catalog
+                    .get_mut("pages")
+                    .and_then(Value::as_array_mut)
+                    .expect("validated pages array");
+                let page = pages
+                    .get_mut(index)
+                    .and_then(Value::as_object_mut)
+                    .ok_or_else(|| {
+                        error("wiki_invalid", "The Wiki page entry is invalid.", false)
+                    })?;
+                if let Some(title) = title.as_deref().filter(|value| !value.trim().is_empty()) {
+                    page.insert("title".to_string(), Value::String(title.trim().to_string()));
+                }
+                if new_slug.is_some() {
+                    page.insert("slug".to_string(), Value::String(next_slug.to_string()));
+                }
+                if next_slug != slug {
+                    page.insert("file".to_string(), Value::String(next_file.clone()));
+                }
+                if section.is_some() && !location.flat_pages {
+                    page.insert(
+                        "section".to_string(),
+                        Value::String(next_section.to_string()),
+                    );
+                }
+                if let Some(group) = group.as_deref() {
+                    page.insert("group".to_string(), Value::String(group.to_string()));
+                }
+                if clear_group.unwrap_or(false) {
+                    page.remove("group");
+                }
+                if let Some(associated_files) = associated_files.as_ref() {
+                    let key = if page.contains_key("sourceRefs") {
+                        "sourceRefs"
+                    } else {
+                        "associatedFiles"
+                    };
+                    page.insert(
+                        key.to_string(),
+                        serde_json::to_value(associated_files).unwrap_or(Value::Array(Vec::new())),
+                    );
+                }
+                if let Some(order) = order {
+                    let page_value = pages.remove(index);
+                    let target_index = (order as usize).min(pages.len());
+                    pages.insert(target_index, page_value);
+                }
+            }
+            if moved {
+                files.push(planned_file(&location, &old_relative, "delete", None)?);
+                files.push(planned_file(
+                    &location,
+                    &next_relative,
+                    "create",
+                    Some(moved_content.into_bytes()),
+                )?);
+            }
+            if !link_changes.is_empty() {
+                warnings.push(format!(
+                    "此次移动会同步更新 {} 个 Wiki 内部链接文件。",
+                    link_changes.len()
+                ));
+            }
+            files.push(planned_catalog(&location, &original_catalog, &catalog)?);
+            checks.push("目标页面、分类路径、slug 和关联源码路径通过校验".to_string());
+            ("metadata", next_slug.to_string(), next_relative)
+        }
+    };
+    let plan = structure_plan(&root, &location, original_catalog.clone(), files)?;
+    crate::mutations::register_structure_change(
+        coordinator,
+        project_id,
+        location.provider,
+        &wiki_id,
+        &slug,
+        &primary_path,
+        operation,
+        plan,
+        checks,
+        warnings,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -402,6 +1013,7 @@ fn create_page_impl(
     app: &AppHandle,
     project_id: &str,
     provider: &str,
+    wiki_id: Option<&str>,
     slug: &str,
     title: &str,
     section: &str,
@@ -424,8 +1036,9 @@ fn create_page_impl(
             false,
         ));
     }
-    let root = project_root(app, project_id)?;
-    let location = location(&root, provider)?;
+    let instance = resolve_provider_instance(app, project_id, provider, wiki_id)?;
+    let root = instance.source_root;
+    let location = location(&root, provider, &instance.wiki_id)?;
     let (original_catalog, mut catalog) = read_catalog(&location)?;
     if catalog
         .get("pages")
@@ -518,6 +1131,7 @@ pub(crate) fn create_page(
     app: &AppHandle,
     project_id: &str,
     provider: &str,
+    wiki_id: Option<&str>,
     slug: &str,
     title: &str,
     section: &str,
@@ -525,7 +1139,7 @@ pub(crate) fn create_page(
     content: &str,
     associated_files: &[String],
 ) -> Result<HubWikiPageMutationResponse, HubCommandError> {
-    let _guard = WIKI_MUTATION_LOCK
+    let _guard = crate::mutations::WIKI_MUTATION_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
         .map_err(|_| error("internal_error", "Wiki mutation lock is unavailable.", true))?;
@@ -533,6 +1147,7 @@ pub(crate) fn create_page(
         app,
         project_id,
         provider,
+        wiki_id,
         slug,
         title,
         section,
@@ -547,9 +1162,10 @@ pub(crate) fn create_pages(
     app: &AppHandle,
     project_id: &str,
     provider: &str,
+    wiki_id: Option<&str>,
     pages: &[CreatePageInput<'_>],
 ) -> Result<HubWikiBatchMutationResponse, HubCommandError> {
-    let _guard = WIKI_MUTATION_LOCK
+    let _guard = crate::mutations::WIKI_MUTATION_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
         .map_err(|_| error("internal_error", "Wiki mutation lock is unavailable.", true))?;
@@ -560,8 +1176,10 @@ pub(crate) fn create_pages(
             false,
         ));
     }
-    let root = project_root(app, project_id)?;
-    let location = location(&root, provider)?;
+    let instance = resolve_provider_instance(app, project_id, provider, wiki_id)?;
+    let root = instance.source_root;
+    let wiki_id = instance.wiki_id;
+    let location = location(&root, provider, &wiki_id)?;
     let (original_catalog, _) = read_catalog(&location)?;
     let mut mutations = Vec::with_capacity(pages.len());
     for page in pages {
@@ -587,6 +1205,7 @@ pub(crate) fn create_pages(
             app,
             project_id,
             provider,
+            Some(&wiki_id),
             page.slug,
             page.title,
             page.section,
@@ -624,6 +1243,7 @@ pub(crate) fn create_pages(
     Ok(HubWikiBatchMutationResponse {
         project_id: project_id.to_string(),
         provider: location.provider,
+        wiki_id: location.wiki_id.clone(),
         mutations,
     })
 }
@@ -632,14 +1252,16 @@ pub(crate) fn delete_page(
     app: &AppHandle,
     project_id: &str,
     provider: &str,
+    wiki_id: Option<&str>,
     slug: &str,
 ) -> Result<HubWikiPageMutationResponse, HubCommandError> {
-    let _guard = WIKI_MUTATION_LOCK
+    let _guard = crate::mutations::WIKI_MUTATION_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
         .map_err(|_| error("internal_error", "Wiki mutation lock is unavailable.", true))?;
-    let root = project_root(app, project_id)?;
-    let location = location(&root, provider)?;
+    let instance = resolve_provider_instance(app, project_id, provider, wiki_id)?;
+    let root = instance.source_root;
+    let location = location(&root, provider, &instance.wiki_id)?;
     let (original_catalog, mut catalog) = read_catalog(&location)?;
     let index = find_page_index(&catalog, slug)?;
     let page = catalog
@@ -697,6 +1319,7 @@ pub(crate) fn update_metadata(
     app: &AppHandle,
     project_id: &str,
     provider: &str,
+    wiki_id: Option<&str>,
     slug: &str,
     new_slug: Option<&str>,
     title: Option<&str>,
@@ -706,12 +1329,13 @@ pub(crate) fn update_metadata(
     order: Option<u32>,
     clear_group: bool,
 ) -> Result<HubWikiPageMutationResponse, HubCommandError> {
-    let _guard = WIKI_MUTATION_LOCK
+    let _guard = crate::mutations::WIKI_MUTATION_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
         .map_err(|_| error("internal_error", "Wiki mutation lock is unavailable.", true))?;
-    let root = project_root(app, project_id)?;
-    let location = location(&root, provider)?;
+    let instance = resolve_provider_instance(app, project_id, provider, wiki_id)?;
+    let root = instance.source_root;
+    let location = location(&root, provider, &instance.wiki_id)?;
     let (original_catalog, mut catalog) = read_catalog(&location)?;
     let index = find_page_index(&catalog, slug)?;
     let pages = catalog

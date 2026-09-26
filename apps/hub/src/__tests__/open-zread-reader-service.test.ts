@@ -22,6 +22,8 @@ function createTransport(
 
 const wikiPayload: HubOpenZreadWiki = {
   provider: 'open_zread',
+  wikiId: 'open_zread@.',
+  sourceRoot: '.',
   status: 'partial',
   catalog: {
     id: 'catalog-1',
@@ -60,6 +62,7 @@ const wikiPayload: HubOpenZreadWiki = {
 const zreadPayload: HubZreadWiki = {
   ...wikiPayload,
   provider: 'zread',
+  wikiId: 'zread@.',
   currentPointer: 'versions/2026-09-17-120000',
   versionId: '2026-09-17-120000',
 };

@@ -9,6 +9,12 @@ import {
   type HubProject,
   type HubProjectAvailability,
   type HubProjectWikiSummary,
+  type HubWikiInstance,
+  type HubWikiInstanceList,
+  type HubMarkdownNode,
+  type HubProjectMarkdownTree,
+  type HubMarkdownDocument,
+  type HubMarkdownAnswerResponse,
   type HubOpenZreadWiki,
   type HubZreadWiki,
   type HubWikiDocument,
@@ -28,8 +34,12 @@ import {
   type HubTask,
   type HubOpenZreadOperation,
   type HubWikiChangeSet,
+  type HubWikiStructureChangeRequest,
   type HubWikiHistoryEntry,
   type HubWikiSearchResponse,
+  type HubMarkdownSearchResult,
+  type HubMarkdownSearchFailure,
+  type HubProjectMarkdownSearchResponse,
   type HubWikiPageMutationResponse,
   type HubWikiMergeResponse,
   type HubWikiAnswerResponse,
@@ -82,34 +92,47 @@ export interface HubApplicationService {
   configureZreadExecutable(): Promise<HubHealth | null>;
   listProjects(): Promise<HubProject[]>;
   selectProjectDirectory(): Promise<string | null>;
+  copyText(text: string): Promise<void>;
   registerProject(path: string): Promise<RegisterProjectResponse>;
+  renameProject(projectId: string, name: string): Promise<HubProject>;
   setProjectFavorite(projectId: string, favorite: boolean): Promise<HubProject>;
+  listProjectWikis(projectId: string): Promise<HubWikiInstanceList>;
+  locateProjectWikis(projectId: string, directory: string): Promise<HubWikiInstanceList>;
+  listProjectMarkdown(projectId: string): Promise<HubProjectMarkdownTree>;
+  readProjectMarkdown(projectId: string, relativePath: string): Promise<HubMarkdownDocument>;
+  saveProjectMarkdown(projectId: string, relativePath: string, baseRevision: string, content: string): Promise<HubMarkdownDocument>;
+  searchProjectMarkdown(projectId: string, query: string): Promise<HubProjectMarkdownSearchResponse>;
+  askProjectMarkdown(projectId: string, relativePath: string, question: string, selectedText?: string): Promise<HubMarkdownAnswerResponse>;
+  readProjectMarkdownAsset(projectId: string, documentPath: string, assetPath: string): Promise<HubWikiAsset>;
+  readProjectMarkdownSource(projectId: string, documentPath: string, sourcePath: string): Promise<HubSourceFile>;
   relocateProject(projectId: string, path: string): Promise<HubProject>;
   removeProject(projectId: string): Promise<void>;
   openProjectFolder(projectId: string): Promise<HubProject>;
   openProjectTerminal(projectId: string): Promise<HubProject>;
   copyProjectPath(path: string): Promise<void>;
-  readOpenZreadWiki(projectId: string): Promise<HubOpenZreadWiki>;
-  readOpenZreadSource(projectId: string, path: string): Promise<HubSourceFile>;
-  readOpenZreadAsset(projectId: string, pagePath: string, assetPath: string): Promise<HubWikiAsset>;
-  readZreadWiki(projectId: string): Promise<HubZreadWiki>;
-  readZreadSource(projectId: string, path: string): Promise<HubSourceFile>;
-  readZreadAsset(projectId: string, pagePath: string, assetPath: string): Promise<HubWikiAsset>;
-  startOpenZreadTask(projectId: string, operation: HubOpenZreadOperation): Promise<HubTask>;
-  startZreadTask(projectId: string): Promise<HubTask>;
-  previewWikiChange(projectId: string, provider: HubWikiProvider, slug: string, content: string): Promise<HubWikiChangeSet>;
+  readOpenZreadWiki(projectId: string, wikiId?: string): Promise<HubOpenZreadWiki>;
+  readOpenZreadSource(projectId: string, path: string, wikiId?: string): Promise<HubSourceFile>;
+  readOpenZreadAsset(projectId: string, pagePath: string, assetPath: string, wikiId?: string): Promise<HubWikiAsset>;
+  readZreadWiki(projectId: string, wikiId?: string): Promise<HubZreadWiki>;
+  readZreadSource(projectId: string, path: string, wikiId?: string): Promise<HubSourceFile>;
+  readZreadAsset(projectId: string, pagePath: string, assetPath: string, wikiId?: string): Promise<HubWikiAsset>;
+  startOpenZreadTask(projectId: string, wikiId: string, operation: HubOpenZreadOperation, resume?: boolean): Promise<HubTask>;
+  startZreadTask(projectId: string, wikiId: string): Promise<HubTask>;
+  previewWikiChange(projectId: string, provider: HubWikiProvider, slug: string, content: string, wikiId?: string): Promise<HubWikiChangeSet>;
+  previewWikiStructureChange(projectId: string, provider: HubWikiProvider, request: HubWikiStructureChangeRequest, wikiId?: string): Promise<HubWikiChangeSet>;
   applyWikiChange(changeSetId: string): Promise<HubWikiChangeSet>;
-  listWikiHistory(projectId: string, provider: HubWikiProvider): Promise<HubWikiHistoryEntry[]>;
-  restoreWikiHistory(projectId: string, provider: HubWikiProvider, historyId: string): Promise<HubWikiHistoryEntry>;
+  listWikiHistory(projectId: string, provider: HubWikiProvider, wikiId?: string): Promise<HubWikiHistoryEntry[]>;
+  restoreWikiHistory(projectId: string, provider: HubWikiProvider, historyId: string, wikiId?: string): Promise<HubWikiHistoryEntry>;
   searchWiki(query: string): Promise<HubWikiSearchResponse>;
-  createWikiPage(projectId: string, provider: HubWikiProvider, input: CreateWikiPageInput): Promise<HubWikiPageMutationResponse>;
-  createWikiPages(projectId: string, provider: HubWikiProvider, inputs: CreateWikiPageInput[]): Promise<HubWikiBatchMutationResponse>;
-  deleteWikiPage(projectId: string, provider: HubWikiProvider, slug: string): Promise<HubWikiPageMutationResponse>;
+  createWikiPage(projectId: string, provider: HubWikiProvider, input: CreateWikiPageInput, wikiId?: string): Promise<HubWikiPageMutationResponse>;
+  createWikiPages(projectId: string, provider: HubWikiProvider, inputs: CreateWikiPageInput[], wikiId?: string): Promise<HubWikiBatchMutationResponse>;
+  deleteWikiPage(projectId: string, provider: HubWikiProvider, slug: string, wikiId?: string): Promise<HubWikiPageMutationResponse>;
   updateWikiPageMetadata(
     projectId: string,
     provider: HubWikiProvider,
     slug: string,
     input: UpdateWikiPageMetadataInput,
+    wikiId?: string,
   ): Promise<HubWikiPageMutationResponse>;
   mergeWikiText(base: string, local: string, incoming: string): Promise<HubWikiMergeResponse>;
   askWiki(
@@ -118,6 +141,7 @@ export interface HubApplicationService {
     slug: string,
     question: string,
     selectedText?: string,
+    wikiId?: string,
   ): Promise<HubWikiAnswerResponse>;
   rewriteWikiPage(
     projectId: string,
@@ -125,12 +149,14 @@ export interface HubApplicationService {
     slug: string,
     instruction: string,
     sectionHeading?: string,
+    wikiId?: string,
   ): Promise<HubWikiChangeSet>;
   draftWikiPage(
     projectId: string,
     provider: HubWikiProvider,
     topic: string,
     section?: string,
+    wikiId?: string,
   ): Promise<HubWikiPageDraftResponse>;
   cancelTask(taskId: string): Promise<CancelTaskResponse>;
   subscribeToTaskEvents(listener: (event: HubTaskEvent) => void): Promise<Unsubscribe>;
@@ -357,6 +383,9 @@ function parseProject(value: unknown): HubProject {
   if (value.lastOpenedAt !== undefined && typeof value.lastOpenedAt !== 'string') {
     throw new HubProtocolError('Invalid Hub response: project last-opened timestamp is malformed.');
   }
+  if (value.addedAt !== undefined && typeof value.addedAt !== 'string') {
+    throw new HubProtocolError('Invalid Hub response: project added timestamp is malformed.');
+  }
   return {
     id: requiredString(value.id, 'project.id'),
     name: requiredString(value.name, 'project.name'),
@@ -367,7 +396,114 @@ function parseProject(value: unknown): HubProject {
     ...(typeof value.availabilityReason === 'string' ? { availabilityReason: value.availabilityReason } : {}),
     wiki: parseProjectWiki(value.wiki),
     favorite: value.favorite,
+    ...(typeof value.addedAt === 'string' ? { addedAt: value.addedAt } : {}),
     ...(typeof value.lastOpenedAt === 'string' ? { lastOpenedAt: value.lastOpenedAt } : {}),
+  };
+}
+
+function parseWikiInstance(value: unknown): HubWikiInstance {
+  if (!isRecord(value) || typeof value.wikiId !== 'string' || !value.wikiId
+    || (value.provider !== 'open_zread' && value.provider !== 'zread')
+    || typeof value.sourceRoot !== 'string' || typeof value.label !== 'string'
+    || (value.status !== 'readable' && value.status !== 'partial' && value.status !== 'invalid')) {
+    throw new HubProtocolError('Invalid Hub response: Wiki instance is malformed.');
+  }
+  return {
+    wikiId: value.wikiId,
+    provider: value.provider,
+    sourceRoot: value.sourceRoot,
+    label: value.label,
+    status: value.status,
+  };
+}
+
+function parseWikiInstanceList(value: unknown): HubWikiInstanceList {
+  if (!isRecord(value) || typeof value.projectId !== 'string' || !Array.isArray(value.instances)
+    || typeof value.scanComplete !== 'boolean' || typeof value.scannedDirectories !== 'number'
+    || (value.warning !== undefined && typeof value.warning !== 'string')) {
+    throw new HubProtocolError('Invalid Hub response: Wiki instance list is malformed.');
+  }
+  return {
+    projectId: value.projectId,
+    instances: value.instances.map(parseWikiInstance),
+    scanComplete: value.scanComplete,
+    scannedDirectories: value.scannedDirectories,
+    ...(typeof value.warning === 'string' ? { warning: value.warning } : {}),
+  };
+}
+
+function parseMarkdownNode(value: unknown): HubMarkdownNode {
+  if (!isRecord(value) || (value.kind !== 'directory' && value.kind !== 'file')
+    || typeof value.name !== 'string' || typeof value.relativePath !== 'string'
+    || (value.title !== undefined && typeof value.title !== 'string')
+    || (value.bytes !== undefined && (typeof value.bytes !== 'number' || !Number.isFinite(value.bytes)))
+    || (value.modifiedAt !== undefined && typeof value.modifiedAt !== 'string')) {
+    throw new HubProtocolError('Invalid Hub response: Markdown tree node is malformed.');
+  }
+  if (value.kind === 'directory' && !Array.isArray(value.children)) {
+    throw new HubProtocolError('Invalid Hub response: Markdown directory children are malformed.');
+  }
+  if (value.kind === 'file' && value.children !== undefined) {
+    throw new HubProtocolError('Invalid Hub response: Markdown file cannot have children.');
+  }
+  return {
+    kind: value.kind,
+    name: value.name,
+    relativePath: value.relativePath,
+    ...(typeof value.title === 'string' ? { title: value.title } : {}),
+    ...(typeof value.bytes === 'number' ? { bytes: value.bytes } : {}),
+    ...(typeof value.modifiedAt === 'string' ? { modifiedAt: value.modifiedAt } : {}),
+    ...(Array.isArray(value.children) ? { children: value.children.map(parseMarkdownNode) } : {}),
+  };
+}
+
+function parseProjectMarkdownTree(value: unknown): HubProjectMarkdownTree {
+  if (!isRecord(value) || typeof value.projectId !== 'string' || !Array.isArray(value.roots)
+    || typeof value.scanComplete !== 'boolean' || typeof value.scannedDirectories !== 'number'
+    || typeof value.scannedFiles !== 'number' || !Array.isArray(value.errors)
+    || (value.warning !== undefined && typeof value.warning !== 'string')) {
+    throw new HubProtocolError('Invalid Hub response: Markdown tree is malformed.');
+  }
+  const errors = value.errors.map((item) => {
+    if (!isRecord(item) || typeof item.relativePath !== 'string' || typeof item.message !== 'string') {
+      throw new HubProtocolError('Invalid Hub response: Markdown scan error is malformed.');
+    }
+    return { relativePath: item.relativePath, message: item.message };
+  });
+  return {
+    projectId: value.projectId,
+    roots: value.roots.map(parseMarkdownNode),
+    scanComplete: value.scanComplete,
+    scannedDirectories: value.scannedDirectories,
+    scannedFiles: value.scannedFiles,
+    errors,
+    ...(typeof value.warning === 'string' ? { warning: value.warning } : {}),
+  };
+}
+
+function parseMarkdownDocument(value: unknown): HubMarkdownDocument {
+  if (!isRecord(value) || typeof value.projectId !== 'string'
+    || typeof value.relativePath !== 'string' || typeof value.title !== 'string'
+    || typeof value.content !== 'string' || typeof value.revision !== 'string') {
+    throw new HubProtocolError('Invalid Hub response: Markdown document is malformed.');
+  }
+  return {
+    projectId: value.projectId,
+    relativePath: value.relativePath,
+    title: value.title,
+    content: value.content,
+    revision: value.revision,
+  };
+}
+
+function parseMarkdownAnswerResponse(value: unknown): HubMarkdownAnswerResponse {
+  if (!isRecord(value)) throw new HubProtocolError('Invalid Hub response: Markdown answer payload is malformed.');
+  return {
+    projectId: requiredString(value.projectId, 'markdownAnswer.projectId'),
+    path: requiredString(value.path, 'markdownAnswer.path'),
+    title: requiredString(value.title, 'markdownAnswer.title'),
+    model: requiredString(value.model, 'markdownAnswer.model'),
+    answer: requiredString(value.answer, 'markdownAnswer.answer'),
   };
 }
 
@@ -464,6 +600,8 @@ function parseWikiDocument<T extends HubWikiProvider>(value: unknown, expectedPr
   }
   return {
     provider: expectedProvider,
+    wikiId: typeof value.wikiId === 'string' ? value.wikiId : `${expectedProvider}@.`,
+    sourceRoot: typeof value.sourceRoot === 'string' ? value.sourceRoot : '.',
     status: value.status,
     catalog: parseWikiCatalog(value.catalog, expectedProvider),
     pages: value.pages.map((page) => parseWikiPage(page, expectedProvider)),
@@ -536,6 +674,12 @@ function parseTaskEvent(value: unknown): HubTaskEvent {
   if (value.message !== undefined && typeof value.message !== 'string') {
     throw new HubProtocolError('Invalid Hub event: message must be a string.');
   }
+  if (value.details !== undefined && typeof value.details !== 'string') {
+    throw new HubProtocolError('Invalid Hub event: details must be a string.');
+  }
+  if (value.canResume !== undefined && typeof value.canResume !== 'boolean') {
+    throw new HubProtocolError('Invalid Hub event: canResume must be a boolean.');
+  }
   if (value.progress !== undefined && (!isRecord(value.progress)
     || typeof value.progress.current !== 'number'
     || typeof value.progress.total !== 'number'
@@ -545,15 +689,24 @@ function parseTaskEvent(value: unknown): HubTaskEvent {
   }
   return {
     taskId: requiredString(value.taskId, 'taskId'),
+    ...(typeof value.projectId === 'string' ? { projectId: value.projectId } : {}),
+    ...(typeof value.wikiId === 'string' ? { wikiId: value.wikiId } : {}),
     kind: kind as HubTaskEvent['kind'],
     status: status as HubTaskEvent['status'],
     phase: requiredString(value.phase, 'phase'),
     occurredAt: requiredString(value.occurredAt, 'occurredAt'),
     ...(typeof value.message === 'string' ? { message: value.message } : {}),
+    ...(typeof value.details === 'string' ? { details: value.details } : {}),
+    ...(typeof value.canResume === 'boolean' ? { canResume: value.canResume } : {}),
     ...(isRecord(value.progress)
       && typeof value.progress.current === 'number'
       && typeof value.progress.total === 'number'
-      ? { progress: { current: value.progress.current, total: value.progress.total } }
+      ? { progress: {
+        current: value.progress.current,
+        total: value.progress.total,
+        ...(typeof value.progress.succeeded === 'number' ? { succeeded: value.progress.succeeded } : {}),
+        ...(typeof value.progress.failed === 'number' ? { failed: value.progress.failed } : {}),
+      } }
       : {}),
   };
 }
@@ -582,6 +735,7 @@ function parseTask(value: unknown): HubTask {
     kind,
     status,
     projectId: requiredString(value.projectId, 'projectId'),
+    wikiId: requiredString(value.wikiId, 'wikiId'),
     provider: value.provider,
     operation,
     model: requiredString(value.model, 'model'),
@@ -601,16 +755,63 @@ function parseChangeSet(value: unknown): HubWikiChangeSet {
   if (status !== 'preview' && status !== 'applied' && status !== 'rejected') {
     throw new HubProtocolError('Invalid Hub response: ChangeSet status is unsupported.');
   }
+  const operation = value.operation;
+  if (operation !== undefined && operation !== 'edit' && operation !== 'create' && operation !== 'batch_create'
+    && operation !== 'delete' && operation !== 'metadata') {
+    throw new HubProtocolError('Invalid Hub response: ChangeSet operation is unsupported.');
+  }
+  const emptyContentAllowed = operation !== undefined && operation !== 'edit';
+  const changeContent = (field: 'before' | 'after'): string => {
+    const content = value[field];
+    if (typeof content !== 'string' || (!emptyContentAllowed && !content.trim())) {
+      throw new HubProtocolError(`Invalid Hub response: ${field} must be a ${emptyContentAllowed ? 'string' : 'non-empty string'}.`);
+    }
+    return content;
+  };
+  const files = value.files === undefined ? undefined : Array.isArray(value.files)
+    ? value.files.map((file) => {
+      if (!isRecord(file) || (file.action !== 'create' && file.action !== 'update' && file.action !== 'delete')
+        || (file.before !== null && typeof file.before !== 'string')
+        || (file.after !== null && typeof file.after !== 'string')) {
+        throw new HubProtocolError('Invalid Hub response: ChangeSet file operation is malformed.');
+      }
+      return {
+        relativePath: requiredString(file.relativePath, 'relativePath'),
+        action: file.action as 'create' | 'update' | 'delete',
+        before: file.before,
+        after: file.after,
+        baseRevision: requiredString(file.baseRevision, 'baseRevision'),
+      };
+    })
+    : (() => { throw new HubProtocolError('Invalid Hub response: ChangeSet files are malformed.'); })();
+  let validation: HubWikiChangeSet['validation'];
+  if (value.validation !== undefined) {
+    if (!isRecord(value.validation) || (value.validation.status !== 'passed' && value.validation.status !== 'failed')
+      || !Array.isArray(value.validation.checks) || !value.validation.checks.every((check) => typeof check === 'string')
+      || !Array.isArray(value.validation.warnings) || !value.validation.warnings.every((warning) => typeof warning === 'string')) {
+      throw new HubProtocolError('Invalid Hub response: ChangeSet validation is malformed.');
+    }
+    validation = { status: value.validation.status, checks: value.validation.checks, warnings: value.validation.warnings };
+  }
+  if (value.versionPointer !== undefined && value.versionPointer !== null && typeof value.versionPointer !== 'string') {
+    throw new HubProtocolError('Invalid Hub response: ChangeSet version pointer is malformed.');
+  }
   return {
     changeSetId: requiredString(value.changeSetId, 'changeSetId'),
     projectId: requiredString(value.projectId, 'projectId'),
     provider,
+    ...(typeof value.wikiId === 'string' ? { wikiId: value.wikiId } : {}),
     slug: requiredString(value.slug, 'slug'),
     relativePath: requiredString(value.relativePath, 'relativePath'),
-    before: requiredString(value.before, 'before'),
-    after: requiredString(value.after, 'after'),
+    before: changeContent('before'),
+    after: changeContent('after'),
     status,
     createdAt: requiredString(value.createdAt, 'createdAt'),
+    ...(operation ? { operation } : {}),
+    ...(typeof value.baseRevision === 'string' ? { baseRevision: value.baseRevision } : {}),
+    ...(value.versionPointer !== undefined ? { versionPointer: value.versionPointer as string | null } : {}),
+    ...(files ? { files } : {}),
+    ...(validation ? { validation } : {}),
   };
 }
 
@@ -625,6 +826,7 @@ function parseHistoryEntry(value: unknown): HubWikiHistoryEntry {
     id: requiredString(value.id, 'id'),
     projectId: requiredString(value.projectId, 'projectId'),
     provider: value.provider,
+    ...(typeof value.wikiId === 'string' ? { wikiId: value.wikiId } : {}),
     label: requiredString(value.label, 'label'),
     createdAt: requiredString(value.createdAt, 'createdAt'),
     current: value.current,
@@ -632,8 +834,68 @@ function parseHistoryEntry(value: unknown): HubWikiHistoryEntry {
   };
 }
 
+function parseMarkdownSearchResult(value: unknown): HubMarkdownSearchResult {
+  if (!isRecord(value) || value.sourceKind !== 'local_markdown'
+    || (value.matchKind !== 'path' && value.matchKind !== 'content')) {
+    throw new HubProtocolError('Invalid Hub response: Markdown search result is malformed.');
+  }
+  for (const field of ['matchLine', 'matchColumn', 'matchLength'] as const) {
+    if (value[field] !== undefined && (typeof value[field] !== 'number' || !Number.isFinite(value[field]) || value[field] < 0)) {
+      throw new HubProtocolError(`Invalid Hub response: Markdown search ${field} is malformed.`);
+    }
+  }
+  return {
+    sourceKind: 'local_markdown',
+    projectId: requiredString(value.projectId, 'markdownResult.projectId'),
+    projectName: requiredString(value.projectName, 'markdownResult.projectName'),
+    path: requiredString(value.path, 'markdownResult.path'),
+    title: requiredString(value.title, 'markdownResult.title'),
+    snippet: requiredString(value.snippet, 'markdownResult.snippet'),
+    matchKind: value.matchKind,
+    ...(typeof value.matchLine === 'number' ? { matchLine: value.matchLine } : {}),
+    ...(typeof value.matchColumn === 'number' ? { matchColumn: value.matchColumn } : {}),
+    ...(typeof value.matchLength === 'number' ? { matchLength: value.matchLength } : {}),
+  };
+}
+
+function parseMarkdownSearchFailure(value: unknown): HubMarkdownSearchFailure {
+  if (!isRecord(value)) throw new HubProtocolError('Invalid Hub response: Markdown search failure is malformed.');
+  return {
+    projectId: requiredString(value.projectId, 'markdownFailure.projectId'),
+    projectName: requiredString(value.projectName, 'markdownFailure.projectName'),
+    ...(typeof value.relativePath === 'string' ? { relativePath: value.relativePath } : {}),
+    message: requiredString(value.message, 'markdownFailure.message'),
+  };
+}
+
+function parseProjectMarkdownSearchResponse(value: unknown): HubProjectMarkdownSearchResponse {
+  if (!isRecord(value) || typeof value.projectId !== 'string' || typeof value.query !== 'string'
+    || !Array.isArray(value.results) || typeof value.scanComplete !== 'boolean'
+    || typeof value.scannedFiles !== 'number' || !Number.isFinite(value.scannedFiles)
+    || !Array.isArray(value.errors) || (value.warning !== undefined && typeof value.warning !== 'string')) {
+    throw new HubProtocolError('Invalid Hub response: project Markdown search payload is malformed.');
+  }
+  const errors = value.errors.map((item) => {
+    if (!isRecord(item) || typeof item.relativePath !== 'string' || typeof item.message !== 'string') {
+      throw new HubProtocolError('Invalid Hub response: Markdown search file error is malformed.');
+    }
+    return { relativePath: item.relativePath, message: item.message };
+  });
+  return {
+    projectId: value.projectId,
+    query: value.query,
+    results: value.results.map(parseMarkdownSearchResult),
+    scanComplete: value.scanComplete,
+    scannedFiles: value.scannedFiles,
+    errors,
+    ...(typeof value.warning === 'string' ? { warning: value.warning } : {}),
+  };
+}
+
 function parseSearchResponse(value: unknown): HubWikiSearchResponse {
-  if (!isRecord(value) || typeof value.query !== 'string' || !Array.isArray(value.results) || !Array.isArray(value.failures)) {
+  if (!isRecord(value) || typeof value.query !== 'string' || !Array.isArray(value.results) || !Array.isArray(value.failures)
+    || (value.markdownResults !== undefined && !Array.isArray(value.markdownResults))
+    || (value.markdownFailures !== undefined && !Array.isArray(value.markdownFailures))) {
     throw new HubProtocolError('Invalid Hub response: search payload is malformed.');
   }
   const results = value.results.filter(isRecord).map((result) => {
@@ -644,6 +906,8 @@ function parseSearchResponse(value: unknown): HubWikiSearchResponse {
       projectId: requiredString(result.projectId, 'result.projectId'),
       projectName: requiredString(result.projectName, 'result.projectName'),
       provider: result.provider as HubWikiProvider,
+      wikiId: requiredString(result.wikiId, 'result.wikiId'),
+      sourceRoot: requiredString(result.sourceRoot, 'result.sourceRoot'),
       slug: requiredString(result.slug, 'result.slug'),
       title: requiredString(result.title, 'result.title'),
       snippet: requiredString(result.snippet, 'result.snippet'),
@@ -658,10 +922,14 @@ function parseSearchResponse(value: unknown): HubWikiSearchResponse {
       projectId: requiredString(failure.projectId, 'failure.projectId'),
       projectName: requiredString(failure.projectName, 'failure.projectName'),
       provider: failure.provider as HubWikiProvider,
+      wikiId: requiredString(failure.wikiId, 'failure.wikiId'),
+      sourceRoot: requiredString(failure.sourceRoot, 'failure.sourceRoot'),
       message: requiredString(failure.message, 'failure.message'),
     };
   });
-  return { query: value.query, results, failures };
+  const markdownResults = (Array.isArray(value.markdownResults) ? value.markdownResults : []).map(parseMarkdownSearchResult);
+  const markdownFailures = (Array.isArray(value.markdownFailures) ? value.markdownFailures : []).map(parseMarkdownSearchFailure);
+  return { query: value.query, results, failures, markdownResults, markdownFailures };
 }
 
 function parseWikiPageMutationResponse(value: unknown): HubWikiPageMutationResponse {
@@ -674,6 +942,7 @@ function parseWikiPageMutationResponse(value: unknown): HubWikiPageMutationRespo
   return {
     projectId: requiredString(value.projectId, 'pageMutation.projectId'),
     provider: value.provider,
+    ...(typeof value.wikiId === 'string' ? { wikiId: value.wikiId } : {}),
     slug: requiredString(value.slug, 'pageMutation.slug'),
     action: value.action,
     relativePath: requiredString(value.relativePath, 'pageMutation.relativePath'),
@@ -714,6 +983,7 @@ function parseAnswerResponse(value: unknown): HubWikiAnswerResponse {
   return {
     projectId: requiredString(value.projectId, 'answer.projectId'),
     provider: value.provider,
+    ...(typeof value.wikiId === 'string' ? { wikiId: value.wikiId } : {}),
     slug: requiredString(value.slug, 'answer.slug'),
     answer: requiredString(value.answer, 'answer.answer'),
     references,
@@ -743,6 +1013,7 @@ function parseBatchMutationResponse(value: unknown): HubWikiBatchMutationRespons
   return {
     projectId: requiredString(value.projectId, 'batchMutation.projectId'),
     provider: value.provider,
+    ...(typeof value.wikiId === 'string' ? { wikiId: value.wikiId } : {}),
     mutations: value.mutations.map(parseWikiPageMutationResponse),
   };
 }
@@ -788,6 +1059,10 @@ export function createHubApplicationService(
       });
     },
 
+    copyText(text) {
+      return transport.copyText(text);
+    },
+
     registerProject(path) {
       const normalizedPath = path.trim();
       if (!normalizedPath) {
@@ -810,6 +1085,96 @@ export function createHubApplicationService(
         projectId: normalizedId,
         favorite,
       }).then(parseProject);
+    },
+
+    renameProject(projectId, name) {
+      const normalizedId = projectId.trim();
+      const normalizedName = name.trim();
+      if (!normalizedId) return invalidRequest('Project id is required.');
+      if (!normalizedName) return invalidRequest('Project name is required.');
+      return transport.invoke(HUB_COMMANDS.renameProject, {
+        projectId: normalizedId,
+        name: normalizedName,
+      }).then(parseProject);
+    },
+
+    listProjectWikis(projectId) {
+      const normalizedId = projectId.trim();
+      if (!normalizedId) return invalidRequest('Project id is required.');
+      return transport.invoke(HUB_COMMANDS.listProjectWikis, { projectId: normalizedId })
+        .then(parseWikiInstanceList);
+    },
+
+    locateProjectWikis(projectId, directory) {
+      const normalizedId = projectId.trim();
+      const normalizedDirectory = directory.trim();
+      if (!normalizedId) return invalidRequest('Project id is required.');
+      if (!normalizedDirectory) return invalidRequest('Wiki directory is required.');
+      return transport.invoke(HUB_COMMANDS.locateProjectWikis, {
+        projectId: normalizedId,
+        directory: normalizedDirectory,
+      }).then(parseWikiInstanceList);
+    },
+
+    listProjectMarkdown(projectId) {
+      const normalizedId = projectId.trim();
+      if (!normalizedId) return invalidRequest('Project id is required.');
+      return transport.invoke(HUB_COMMANDS.listProjectMarkdown, { projectId: normalizedId })
+        .then(parseProjectMarkdownTree);
+    },
+
+    readProjectMarkdown(projectId, relativePath) {
+      const normalizedId = projectId.trim();
+      const normalizedPath = relativePath.trim();
+      if (!normalizedId) return invalidRequest('Project id is required.');
+      if (!normalizedPath) return invalidRequest('Markdown path is required.');
+      return transport.invoke(HUB_COMMANDS.readProjectMarkdown, {
+        projectId: normalizedId,
+        relativePath: normalizedPath,
+      }).then(parseMarkdownDocument);
+    },
+
+    saveProjectMarkdown(projectId, relativePath, baseRevision, content) {
+      const normalizedId = projectId.trim();
+      const normalizedPath = relativePath.trim();
+      const normalizedRevision = baseRevision.trim();
+      if (!normalizedId) return invalidRequest('Project id is required.');
+      if (!normalizedPath) return invalidRequest('Markdown path is required.');
+      if (!normalizedRevision) return invalidRequest('Markdown base revision is required.');
+      return transport.invoke(HUB_COMMANDS.saveProjectMarkdown, {
+        projectId: normalizedId,
+        relativePath: normalizedPath,
+        baseRevision: normalizedRevision,
+        content,
+      }).then(parseMarkdownDocument);
+    },
+
+    readProjectMarkdownAsset(projectId, documentPath, assetPath) {
+      const normalizedId = projectId.trim();
+      const normalizedDocumentPath = documentPath.trim();
+      const normalizedAssetPath = assetPath.trim();
+      if (!normalizedId) return invalidRequest('Project id is required.');
+      if (!normalizedDocumentPath) return invalidRequest('Markdown document path is required.');
+      if (!normalizedAssetPath) return invalidRequest('Markdown asset path is required.');
+      return transport.invoke(HUB_COMMANDS.readProjectMarkdownAsset, {
+        projectId: normalizedId,
+        documentPath: normalizedDocumentPath,
+        assetPath: normalizedAssetPath,
+      }).then(parseWikiAsset);
+    },
+
+    readProjectMarkdownSource(projectId, documentPath, sourcePath) {
+      const normalizedId = projectId.trim();
+      const normalizedDocumentPath = documentPath.trim();
+      const normalizedSourcePath = sourcePath.trim();
+      if (!normalizedId) return invalidRequest('Project id is required.');
+      if (!normalizedDocumentPath) return invalidRequest('Markdown document path is required.');
+      if (!normalizedSourcePath) return invalidRequest('Markdown source path is required.');
+      return transport.invoke(HUB_COMMANDS.readProjectMarkdownSource, {
+        projectId: normalizedId,
+        documentPath: normalizedDocumentPath,
+        sourcePath: normalizedSourcePath,
+      }).then(parseSourceFile);
     },
 
     relocateProject(projectId, path) {
@@ -853,16 +1218,19 @@ export function createHubApplicationService(
       return transport.copyText(normalizedPath);
     },
 
-    readOpenZreadWiki(projectId) {
+    readOpenZreadWiki(projectId, wikiId) {
       const normalizedId = projectId.trim();
       if (!normalizedId) {
         return invalidRequest('Project id is required.');
       }
-      return transport.invoke(HUB_COMMANDS.readOpenZreadWiki, { projectId: normalizedId })
+      return transport.invoke(HUB_COMMANDS.readOpenZreadWiki, {
+        projectId: normalizedId,
+        ...(wikiId ? { wikiId } : {}),
+      })
         .then(parseOpenZreadWiki);
     },
 
-    readOpenZreadSource(projectId, path) {
+    readOpenZreadSource(projectId, path, wikiId) {
       const normalizedId = projectId.trim();
       const normalizedPath = path.trim();
       if (!normalizedId) {
@@ -874,10 +1242,11 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.readOpenZreadSource, {
         projectId: normalizedId,
         path: normalizedPath,
+        ...(wikiId ? { wikiId } : {}),
       }).then(parseSourceFile);
     },
 
-    readOpenZreadAsset(projectId, pagePath, assetPath) {
+    readOpenZreadAsset(projectId, pagePath, assetPath, wikiId) {
       const normalizedId = projectId.trim();
       const normalizedPagePath = pagePath.trim();
       const normalizedAssetPath = assetPath.trim();
@@ -894,19 +1263,23 @@ export function createHubApplicationService(
         projectId: normalizedId,
         pagePath: normalizedPagePath,
         assetPath: normalizedAssetPath,
+        ...(wikiId ? { wikiId } : {}),
       }).then(parseWikiAsset);
     },
 
-    readZreadWiki(projectId) {
+    readZreadWiki(projectId, wikiId) {
       const normalizedId = projectId.trim();
       if (!normalizedId) {
         return invalidRequest('Project id is required.');
       }
-      return transport.invoke(HUB_COMMANDS.readZreadWiki, { projectId: normalizedId })
+      return transport.invoke(HUB_COMMANDS.readZreadWiki, {
+        projectId: normalizedId,
+        ...(wikiId ? { wikiId } : {}),
+      })
         .then(parseZreadWiki);
     },
 
-    readZreadSource(projectId, path) {
+    readZreadSource(projectId, path, wikiId) {
       const normalizedId = projectId.trim();
       const normalizedPath = path.trim();
       if (!normalizedId) {
@@ -918,10 +1291,11 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.readZreadSource, {
         projectId: normalizedId,
         path: normalizedPath,
+        ...(wikiId ? { wikiId } : {}),
       }).then(parseSourceFile);
     },
 
-    readZreadAsset(projectId, pagePath, assetPath) {
+    readZreadAsset(projectId, pagePath, assetPath, wikiId) {
       const normalizedId = projectId.trim();
       const normalizedPagePath = pagePath.trim();
       const normalizedAssetPath = assetPath.trim();
@@ -938,34 +1312,46 @@ export function createHubApplicationService(
         projectId: normalizedId,
         pagePath: normalizedPagePath,
         assetPath: normalizedAssetPath,
+        ...(wikiId ? { wikiId } : {}),
       }).then(parseWikiAsset);
     },
 
-    startOpenZreadTask(projectId, operation) {
+    startOpenZreadTask(projectId, wikiId, operation, resume = false) {
       const normalizedId = projectId.trim();
+      const normalizedWikiId = wikiId.trim();
       if (!normalizedId) {
         return invalidRequest('Project id is required.');
+      }
+      if (!normalizedWikiId) {
+        return invalidRequest('Wiki instance id is required.');
       }
       if (operation !== 'generate' && operation !== 'sync') {
         return invalidRequest('OpenZread operation must be generate or sync.');
       }
       return transport.invoke(HUB_COMMANDS.startOpenZreadTask, {
         projectId: normalizedId,
+        wikiId: normalizedWikiId,
         operation,
+        resume,
       }).then(parseTask);
     },
 
-    startZreadTask(projectId) {
+    startZreadTask(projectId, wikiId) {
       const normalizedId = projectId.trim();
+      const normalizedWikiId = wikiId.trim();
       if (!normalizedId) {
         return invalidRequest('Project id is required.');
       }
+      if (!normalizedWikiId) {
+        return invalidRequest('Wiki instance id is required.');
+      }
       return transport.invoke(HUB_COMMANDS.startZreadTask, {
         projectId: normalizedId,
+        wikiId: normalizedWikiId,
       }).then(parseTask);
     },
 
-    previewWikiChange(projectId, provider, slug, content) {
+    previewWikiChange(projectId, provider, slug, content, wikiId) {
       const normalizedId = projectId.trim();
       const normalizedSlug = slug.trim();
       if (!normalizedId || !normalizedSlug) {
@@ -977,8 +1363,24 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.previewWikiChange, {
         projectId: normalizedId,
         provider,
+        ...(wikiId !== undefined ? { wikiId } : {}),
         slug: normalizedSlug,
         content,
+      }).then(parseChangeSet);
+    },
+
+    previewWikiStructureChange(projectId, provider, request, wikiId) {
+      const normalizedId = projectId.trim();
+      if (!normalizedId) return invalidRequest('Project id is required.');
+      if (provider !== 'open_zread' && provider !== 'zread') return invalidRequest('Wiki provider is required.');
+      if (request.operation === 'create' && request.pages.length === 0) return invalidRequest('At least one Wiki page is required.');
+      if (request.operation === 'delete' && !request.slug.trim()) return invalidRequest('Page slug is required.');
+      if (request.operation === 'metadata' && !request.slug.trim()) return invalidRequest('Page slug is required.');
+      return transport.invoke(HUB_COMMANDS.previewWikiStructureChange, {
+        projectId: normalizedId,
+        provider,
+        ...(wikiId !== undefined ? { wikiId } : {}),
+        request,
       }).then(parseChangeSet);
     },
 
@@ -992,7 +1394,7 @@ export function createHubApplicationService(
       }).then(parseChangeSet);
     },
 
-    listWikiHistory(projectId, provider) {
+    listWikiHistory(projectId, provider, wikiId) {
       const normalizedId = projectId.trim();
       if (!normalizedId) {
         return invalidRequest('Project id is required.');
@@ -1000,6 +1402,7 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.listWikiHistory, {
         projectId: normalizedId,
         provider,
+        ...(wikiId !== undefined ? { wikiId } : {}),
       }).then((value) => {
         if (!Array.isArray(value)) {
           throw new HubProtocolError('Invalid Hub response: history is not a list.');
@@ -1008,7 +1411,7 @@ export function createHubApplicationService(
       });
     },
 
-    restoreWikiHistory(projectId, provider, historyId) {
+    restoreWikiHistory(projectId, provider, historyId, wikiId) {
       const normalizedId = projectId.trim();
       const normalizedHistoryId = historyId.trim();
       if (!normalizedId || !normalizedHistoryId) {
@@ -1017,6 +1420,7 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.restoreWikiHistory, {
         projectId: normalizedId,
         provider,
+        ...(wikiId !== undefined ? { wikiId } : {}),
         historyId: normalizedHistoryId,
       }).then(parseHistoryEntry);
     },
@@ -1029,7 +1433,33 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.searchWiki, { query: normalizedQuery }).then(parseSearchResponse);
     },
 
-    createWikiPage(projectId, provider, input) {
+    searchProjectMarkdown(projectId, query) {
+      const normalizedId = projectId.trim();
+      const normalizedQuery = query.trim();
+      if (!normalizedId) return invalidRequest('Project id is required.');
+      if (!normalizedQuery) return invalidRequest('Search query is required.');
+      return transport.invoke(HUB_COMMANDS.searchProjectMarkdown, {
+        projectId: normalizedId,
+        query: normalizedQuery,
+      }).then(parseProjectMarkdownSearchResponse);
+    },
+
+    askProjectMarkdown(projectId, relativePath, question, selectedText) {
+      const normalizedId = projectId.trim();
+      const normalizedPath = relativePath.trim();
+      const normalizedQuestion = question.trim();
+      if (!normalizedId) return invalidRequest('Project id is required.');
+      if (!normalizedPath) return invalidRequest('Markdown path is required.');
+      if (!normalizedQuestion) return invalidRequest('A question is required.');
+      return transport.invoke(HUB_COMMANDS.askProjectMarkdown, {
+        projectId: normalizedId,
+        relativePath: normalizedPath,
+        question: normalizedQuestion,
+        ...(selectedText?.trim() ? { selectedText: selectedText.trim() } : {}),
+      }).then(parseMarkdownAnswerResponse);
+    },
+
+    createWikiPage(projectId, provider, input, wikiId) {
       const normalizedId = projectId.trim();
       const normalizedSlug = input.slug.trim();
       const normalizedTitle = input.title.trim();
@@ -1043,6 +1473,7 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.createWikiPage, {
         projectId: normalizedId,
         provider,
+        ...(wikiId !== undefined ? { wikiId } : {}),
         slug: normalizedSlug,
         title: normalizedTitle,
         section: normalizedSection,
@@ -1052,7 +1483,7 @@ export function createHubApplicationService(
       }).then(parseWikiPageMutationResponse);
     },
 
-    createWikiPages(projectId, provider, inputs) {
+    createWikiPages(projectId, provider, inputs, wikiId) {
       const normalizedId = projectId.trim();
       if (!normalizedId || inputs.length === 0) {
         return invalidRequest('Project id and at least one Wiki page are required.');
@@ -1063,6 +1494,7 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.createWikiPages, {
         projectId: normalizedId,
         provider,
+        ...(wikiId !== undefined ? { wikiId } : {}),
         pages: inputs.map((input) => ({
           slug: input.slug.trim(),
           title: input.title.trim(),
@@ -1074,7 +1506,7 @@ export function createHubApplicationService(
       }).then(parseBatchMutationResponse);
     },
 
-    deleteWikiPage(projectId, provider, slug) {
+    deleteWikiPage(projectId, provider, slug, wikiId) {
       const normalizedId = projectId.trim();
       const normalizedSlug = slug.trim();
       if (!normalizedId || !normalizedSlug) {
@@ -1086,11 +1518,12 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.deleteWikiPage, {
         projectId: normalizedId,
         provider,
+        ...(wikiId !== undefined ? { wikiId } : {}),
         slug: normalizedSlug,
       }).then(parseWikiPageMutationResponse);
     },
 
-    updateWikiPageMetadata(projectId, provider, slug, input) {
+    updateWikiPageMetadata(projectId, provider, slug, input, wikiId) {
       const normalizedId = projectId.trim();
       const normalizedSlug = slug.trim();
       if (!normalizedId || !normalizedSlug) {
@@ -1117,6 +1550,7 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.updateWikiPageMetadata, {
         projectId: normalizedId,
         provider,
+        ...(wikiId !== undefined ? { wikiId } : {}),
         slug: normalizedSlug,
         ...normalizedInput,
       }).then(parseWikiPageMutationResponse);
@@ -1129,7 +1563,7 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.mergeWikiText, { base, local, incoming }).then(parseMergeResponse);
     },
 
-    askWiki(projectId, provider, slug, question, selectedText) {
+    askWiki(projectId, provider, slug, question, selectedText, wikiId) {
       const normalizedId = projectId.trim();
       const normalizedSlug = slug.trim();
       const normalizedQuestion = question.trim();
@@ -1142,13 +1576,14 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.askWiki, {
         projectId: normalizedId,
         provider,
+        ...(wikiId !== undefined ? { wikiId } : {}),
         slug: normalizedSlug,
         question: normalizedQuestion,
         ...(selectedText?.trim() ? { selectedText: selectedText.trim() } : {}),
       }).then(parseAnswerResponse);
     },
 
-    rewriteWikiPage(projectId, provider, slug, instruction, sectionHeading) {
+    rewriteWikiPage(projectId, provider, slug, instruction, sectionHeading, wikiId) {
       const normalizedId = projectId.trim();
       const normalizedSlug = slug.trim();
       const normalizedInstruction = instruction.trim();
@@ -1161,13 +1596,14 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.rewriteWikiPage, {
         projectId: normalizedId,
         provider,
+        ...(wikiId !== undefined ? { wikiId } : {}),
         slug: normalizedSlug,
         instruction: normalizedInstruction,
         ...(sectionHeading?.trim() ? { sectionHeading: sectionHeading.trim() } : {}),
       }).then(parseChangeSet);
     },
 
-    draftWikiPage(projectId, provider, topic, section) {
+    draftWikiPage(projectId, provider, topic, section, wikiId) {
       const normalizedId = projectId.trim();
       const normalizedTopic = topic.trim();
       if (!normalizedId || !normalizedTopic) {
@@ -1179,6 +1615,7 @@ export function createHubApplicationService(
       return transport.invoke(HUB_COMMANDS.draftWikiPage, {
         projectId: normalizedId,
         provider,
+        ...(wikiId !== undefined ? { wikiId } : {}),
         topic: normalizedTopic,
         ...(section?.trim() ? { section: section.trim() } : {}),
       }).then(parsePageDraftResponse);

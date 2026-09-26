@@ -1,21 +1,24 @@
 use crate::contracts::{
-    CancelTaskResponse, HubCommandError, HubHealth, HubOpenZreadWiki, HubProject,
-    HubProviderCapabilities, HubProviderContentHealth, HubProviderGeneratorHealth,
-    HubProviderHealth, HubRunnerInfo, HubServiceHealth, HubSourceFile, HubTask, HubTaskEvent,
-    HubWikiAnswerReference, HubWikiAnswerResponse, HubWikiAsset, HubWikiBatchMutationResponse,
-    HubWikiChangeSet, HubWikiHistoryEntry, HubWikiMergeResponse, HubWikiPageDraftResponse,
+    CancelTaskResponse, HubCommandError, HubHealth, HubMarkdownAnswerResponse, HubMarkdownDocument,
+    HubOpenZreadWiki, HubProject, HubProjectMarkdownTree, HubProviderCapabilities,
+    HubProviderContentHealth, HubProviderGeneratorHealth, HubProviderHealth, HubRunnerInfo,
+    HubServiceHealth, HubSourceFile, HubTask, HubTaskEvent, HubWikiAnswerReference,
+    HubWikiAnswerResponse, HubWikiAsset, HubWikiBatchMutationResponse, HubWikiChangeSet,
+    HubWikiHistoryEntry, HubWikiInstanceList, HubWikiMergeResponse, HubWikiPageDraftResponse,
     HubWikiPageMutationResponse, HubWikiSearchResponse, RegisterProjectResponse, TASK_EVENT,
 };
 use crate::mutations::ChangeSetCoordinator;
 use crate::projects::{
     list_projects, open_project_folder, open_project_terminal, register_project, relocate_project,
-    remove_project, set_project_favorite,
+    remove_project, rename_project, set_project_favorite,
 };
 use crate::reader::{
-    read_open_zread_asset, read_open_zread_source, read_open_zread_wiki, read_zread_asset,
-    read_zread_source, read_zread_wiki,
+    read_asset_for_instance, read_open_zread_asset, read_open_zread_source, read_open_zread_wiki,
+    read_source_for_instance, read_wiki_instance, read_zread_asset, read_zread_source,
+    read_zread_wiki,
 };
 use crate::tasks::TaskCoordinator;
+use crate::wiki_instances::resolve_provider_instance;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Write;
@@ -29,6 +32,9 @@ const RUNNER_EXECUTABLE: &str = "open-zread.exe";
 const RUNNER_MANIFEST: &str = "open-zread.manifest.json";
 const PROVIDER_SETTINGS_FILE: &str = "provider-settings.json";
 const ZREAD_NOT_DETECTED: &str = "Not detected";
+const MAX_MARKDOWN_ASK_CONTEXT_BYTES: usize = 64 * 1024;
+const MAX_MARKDOWN_ASK_QUESTION_BYTES: usize = 20 * 1024;
+const MAX_MARKDOWN_ASK_SELECTION_BYTES: usize = 12 * 1024;
 
 fn command_error(
     code: &'static str,
@@ -40,6 +46,30 @@ fn command_error(
         message: message.into(),
         retryable,
     }
+}
+
+fn validate_markdown_ask_sizes(
+    question: &str,
+    selected_text: Option<&str>,
+    document_content: &str,
+) -> Result<(), HubCommandError> {
+    if question.len() > MAX_MARKDOWN_ASK_QUESTION_BYTES
+        || selected_text.is_some_and(|text| text.len() > MAX_MARKDOWN_ASK_SELECTION_BYTES)
+    {
+        return Err(command_error(
+            "invalid_request",
+            "The question or selected text exceeds the supported size.",
+            false,
+        ));
+    }
+    if document_content.len() > MAX_MARKDOWN_ASK_CONTEXT_BYTES {
+        return Err(command_error(
+            "context_too_large",
+            "This Markdown document exceeds the 64 KiB Ask AI context limit. Ask about a smaller section by selecting text, or shorten the document before retrying.",
+            false,
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -580,6 +610,8 @@ pub fn get_hub_health(app: AppHandle) -> HubHealth {
         &app,
         HubTaskEvent {
             task_id: "health-check".to_string(),
+            project_id: None,
+            wiki_id: None,
             kind: "maintenance",
             status: "succeeded",
             phase: "health-check".to_string(),
@@ -588,7 +620,9 @@ pub fn get_hub_health(app: AppHandle) -> HubHealth {
                 .map(|duration| duration.as_millis().to_string())
                 .unwrap_or_else(|_| "0".to_string()),
             message: Some("Application service health check completed.".to_string()),
+            details: None,
             progress: None,
+            can_resume: None,
         },
     );
 
@@ -618,9 +652,18 @@ pub fn start_hub_open_zread_task(
     app: AppHandle,
     coordinator: State<'_, TaskCoordinator>,
     project_id: String,
+    wiki_id: String,
     operation: String,
+    resume: bool,
 ) -> Result<HubTask, HubCommandError> {
-    crate::tasks::start_open_zread_task(&app, coordinator.inner(), &project_id, &operation)
+    crate::tasks::start_open_zread_task(
+        &app,
+        coordinator.inner(),
+        &project_id,
+        &wiki_id,
+        &operation,
+        resume,
+    )
 }
 
 #[tauri::command]
@@ -628,8 +671,9 @@ pub fn start_hub_zread_task(
     app: AppHandle,
     coordinator: State<'_, TaskCoordinator>,
     project_id: String,
+    wiki_id: String,
 ) -> Result<HubTask, HubCommandError> {
-    crate::tasks::start_zread_task(&app, coordinator.inner(), &project_id)
+    crate::tasks::start_zread_task(&app, coordinator.inner(), &project_id, &wiki_id)
 }
 
 #[tauri::command]
@@ -638,10 +682,38 @@ pub fn preview_hub_wiki_change(
     coordinator: State<'_, ChangeSetCoordinator>,
     project_id: String,
     provider: String,
+    wiki_id: Option<String>,
     slug: String,
     content: String,
 ) -> Result<HubWikiChangeSet, HubCommandError> {
-    crate::mutations::preview_change(&app, &coordinator, &project_id, &provider, &slug, &content)
+    crate::mutations::preview_change(
+        &app,
+        &coordinator,
+        &project_id,
+        &provider,
+        wiki_id.as_deref(),
+        &slug,
+        &content,
+    )
+}
+
+#[tauri::command]
+pub fn preview_hub_wiki_structure_change(
+    app: AppHandle,
+    coordinator: State<'_, ChangeSetCoordinator>,
+    project_id: String,
+    provider: String,
+    wiki_id: Option<String>,
+    request: crate::page_ops::StructureChangeRequest,
+) -> Result<HubWikiChangeSet, HubCommandError> {
+    crate::page_ops::preview_structure_change(
+        &app,
+        &coordinator,
+        &project_id,
+        &provider,
+        wiki_id.as_deref(),
+        request,
+    )
 }
 
 #[tauri::command]
@@ -658,8 +730,9 @@ pub fn list_hub_wiki_history(
     app: AppHandle,
     project_id: String,
     provider: String,
+    wiki_id: Option<String>,
 ) -> Result<Vec<HubWikiHistoryEntry>, HubCommandError> {
-    crate::history::list_history(&app, &project_id, &provider)
+    crate::history::list_history(&app, &project_id, &provider, wiki_id.as_deref())
 }
 
 #[tauri::command]
@@ -668,8 +741,15 @@ pub fn restore_hub_wiki_history(
     project_id: String,
     provider: String,
     history_id: String,
+    wiki_id: Option<String>,
 ) -> Result<HubWikiHistoryEntry, HubCommandError> {
-    crate::history::restore_history(&app, &project_id, &provider, &history_id)
+    crate::history::restore_history(
+        &app,
+        &project_id,
+        &provider,
+        &history_id,
+        wiki_id.as_deref(),
+    )
 }
 
 #[tauri::command]
@@ -681,11 +761,136 @@ pub fn search_hub_wiki(
 }
 
 #[tauri::command]
+pub fn search_hub_project_markdown(
+    app: AppHandle,
+    project_id: String,
+    query: String,
+) -> Result<crate::contracts::HubProjectMarkdownSearchResponse, HubCommandError> {
+    crate::search::search_project_markdown(&app, &project_id, &query)
+}
+
+#[tauri::command]
+pub fn ask_hub_project_markdown(
+    app: AppHandle,
+    project_id: String,
+    relative_path: String,
+    question: String,
+    selected_text: Option<String>,
+) -> Result<HubMarkdownAnswerResponse, HubCommandError> {
+    let project_id = project_id.trim();
+    let relative_path = relative_path.trim();
+    let question = question.trim();
+    let selected_text = selected_text
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty());
+    if project_id.is_empty() || relative_path.is_empty() || question.is_empty() {
+        return Err(command_error(
+            "invalid_request",
+            "Project id, Markdown path, and question are required.",
+            false,
+        ));
+    }
+    let project = list_projects(&app)?
+        .into_iter()
+        .find(|project| project.id == project_id)
+        .ok_or_else(|| command_error("invalid_request", "Project is not registered.", false))?;
+    if project.availability != "available" {
+        return Err(command_error(
+            "project_unavailable",
+            "The project directory is currently unavailable. Reconnect it before asking about Markdown.",
+            true,
+        ));
+    }
+    let document = crate::markdown::read_project_markdown(&app, project_id, relative_path)?;
+    validate_markdown_ask_sizes(question, selected_text.as_deref(), &document.content)?;
+
+    let executable = embedded_runner_executable(&app)?;
+    let input = serde_json::json!({
+        "question": question,
+        "pageTitle": document.title,
+        "pageSlug": document.relative_path,
+        "pageContent": document.content,
+        "selectedText": selected_text,
+    });
+    let mut process = Command::new(executable)
+        .arg("wiki")
+        .arg("--stdio")
+        .arg("--operation")
+        .arg("ask")
+        .current_dir(&project.path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|spawn_error| {
+            command_error(
+                "service_unavailable",
+                format!("Unable to start the Hub Q&A runner: {spawn_error}"),
+                true,
+            )
+        })?;
+    if let Some(mut stdin) = process.stdin.take() {
+        serde_json::to_writer(&mut stdin, &input).map_err(|write_error| {
+            command_error("internal_error", write_error.to_string(), true)
+        })?;
+        stdin.flush().map_err(|write_error| {
+            command_error("internal_error", write_error.to_string(), true)
+        })?;
+    }
+    let output = process
+        .wait_with_output()
+        .map_err(|wait_error| command_error("service_unavailable", wait_error.to_string(), true))?;
+    if !output.status.success() {
+        let details = String::from_utf8_lossy(&output.stderr)
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .take(8)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .chars()
+            .take(2400)
+            .collect::<String>();
+        let message = if details.is_empty() {
+            "The configured Hub model could not answer the Markdown question. Check model configuration and network access.".to_string()
+        } else {
+            format!("The configured Hub model could not answer the Markdown question. Check model configuration and network access.\n\n{details}")
+        };
+        return Err(command_error("service_unavailable", message, true));
+    }
+    let answer = serde_json::from_slice::<RunnerAnswer>(&output.stdout).map_err(|_| {
+        command_error(
+            "internal_error",
+            "The Hub Q&A runner returned an invalid response.",
+            true,
+        )
+    })?;
+    if answer.kind != "qa" || answer.status != "succeeded" || answer.answer.trim().is_empty() {
+        return Err(command_error(
+            "service_unavailable",
+            "The Hub Q&A runner did not return an answer.",
+            true,
+        ));
+    }
+    Ok(HubMarkdownAnswerResponse {
+        project_id: document.project_id,
+        path: document.relative_path,
+        title: document.title,
+        model: answer
+            .model
+            .filter(|model| !model.trim().is_empty())
+            .unwrap_or_else(|| "Hub 已配置的模型".to_string()),
+        answer: answer.answer,
+    })
+}
+
+#[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn create_hub_wiki_page(
     app: AppHandle,
     project_id: String,
     provider: String,
+    wiki_id: Option<String>,
     slug: String,
     title: String,
     section: String,
@@ -697,6 +902,7 @@ pub fn create_hub_wiki_page(
         &app,
         &project_id,
         &provider,
+        wiki_id.as_deref(),
         &slug,
         &title,
         &section,
@@ -722,6 +928,7 @@ pub fn create_hub_wiki_pages(
     app: AppHandle,
     project_id: String,
     provider: String,
+    wiki_id: Option<String>,
     pages: Vec<CreateHubWikiPageInput>,
 ) -> Result<HubWikiBatchMutationResponse, HubCommandError> {
     let inputs = pages
@@ -735,7 +942,7 @@ pub fn create_hub_wiki_pages(
             associated_files: &page.associated_files,
         })
         .collect::<Vec<_>>();
-    crate::page_ops::create_pages(&app, &project_id, &provider, &inputs)
+    crate::page_ops::create_pages(&app, &project_id, &provider, wiki_id.as_deref(), &inputs)
 }
 
 #[tauri::command]
@@ -743,9 +950,10 @@ pub fn delete_hub_wiki_page(
     app: AppHandle,
     project_id: String,
     provider: String,
+    wiki_id: Option<String>,
     slug: String,
 ) -> Result<HubWikiPageMutationResponse, HubCommandError> {
-    crate::page_ops::delete_page(&app, &project_id, &provider, &slug)
+    crate::page_ops::delete_page(&app, &project_id, &provider, wiki_id.as_deref(), &slug)
 }
 
 #[tauri::command]
@@ -754,6 +962,7 @@ pub fn update_hub_wiki_page_metadata(
     app: AppHandle,
     project_id: String,
     provider: String,
+    wiki_id: Option<String>,
     slug: String,
     new_slug: Option<String>,
     title: Option<String>,
@@ -767,6 +976,7 @@ pub fn update_hub_wiki_page_metadata(
         &app,
         &project_id,
         &provider,
+        wiki_id.as_deref(),
         &slug,
         new_slug.as_deref(),
         title.as_deref(),
@@ -801,6 +1011,8 @@ struct RunnerAnswer {
     status: String,
     answer: String,
     references: Vec<RunnerAnswerReference>,
+    #[serde(default)]
+    model: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -894,6 +1106,7 @@ pub fn ask_hub_wiki(
     slug: String,
     question: String,
     selected_text: Option<String>,
+    wiki_id: Option<String>,
 ) -> Result<HubWikiAnswerResponse, HubCommandError> {
     let project_id = project_id.trim();
     let slug = slug.trim();
@@ -916,18 +1129,9 @@ pub fn ask_hub_wiki(
             false,
         ));
     }
-    let page = match provider.as_str() {
-        "open_zread" => read_open_zread_wiki(&app, project_id)?,
-        "zread" => read_zread_wiki(&app, project_id)?,
-        _ => {
-            return Err(command_error(
-                "invalid_request",
-                "Wiki provider must be open_zread or zread.",
-                false,
-            ))
-        }
-    };
-    let page = page
+    let instance = resolve_provider_instance(&app, project_id, &provider, wiki_id.as_deref())?;
+    let wiki = read_wiki_instance(&app, project_id, &instance.wiki_id, instance.provider)?;
+    let page = wiki
         .pages
         .iter()
         .find(|page| page.slug == slug)
@@ -939,16 +1143,6 @@ pub fn ask_hub_wiki(
             true,
         )
     })?;
-    let project = list_projects(&app)?
-        .into_iter()
-        .find(|project| project.id == project_id)
-        .ok_or_else(|| {
-            command_error(
-                "project_not_found",
-                "The selected Project is not registered.",
-                false,
-            )
-        })?;
     let executable = embedded_runner_executable(&app)?;
     let input = serde_json::json!({
         "question": question,
@@ -962,7 +1156,7 @@ pub fn ask_hub_wiki(
         .arg("--stdio")
         .arg("--operation")
         .arg("ask")
-        .current_dir(&project.path)
+        .current_dir(&instance.source_root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1013,6 +1207,7 @@ pub fn ask_hub_wiki(
         } else {
             "open_zread"
         },
+        wiki_id: instance.wiki_id,
         slug: slug.to_string(),
         answer: answer.answer,
         references: answer
@@ -1032,6 +1227,7 @@ pub fn rewrite_hub_wiki_page(
     coordinator: State<'_, ChangeSetCoordinator>,
     project_id: String,
     provider: String,
+    wiki_id: Option<String>,
     slug: String,
     instruction: String,
     section_heading: Option<String>,
@@ -1053,18 +1249,9 @@ pub fn rewrite_hub_wiki_page(
             false,
         ));
     }
-    let page = match provider.as_str() {
-        "open_zread" => read_open_zread_wiki(&app, project_id)?,
-        "zread" => read_zread_wiki(&app, project_id)?,
-        _ => {
-            return Err(command_error(
-                "invalid_request",
-                "Wiki provider must be open_zread or zread.",
-                false,
-            ))
-        }
-    };
-    let page = page
+    let instance = resolve_provider_instance(&app, project_id, &provider, wiki_id.as_deref())?;
+    let wiki = read_wiki_instance(&app, project_id, &instance.wiki_id, instance.provider)?;
+    let page = wiki
         .pages
         .iter()
         .find(|page| page.slug == slug)
@@ -1076,16 +1263,6 @@ pub fn rewrite_hub_wiki_page(
             true,
         )
     })?;
-    let project = list_projects(&app)?
-        .into_iter()
-        .find(|project| project.id == project_id)
-        .ok_or_else(|| {
-            command_error(
-                "project_not_found",
-                "The selected Project is not registered.",
-                false,
-            )
-        })?;
     let executable = embedded_runner_executable(&app)?;
     let input = serde_json::json!({
         "instruction": instruction,
@@ -1099,7 +1276,7 @@ pub fn rewrite_hub_wiki_page(
         .arg("--stdio")
         .arg("--operation")
         .arg("rewrite")
-        .current_dir(&project.path)
+        .current_dir(&instance.source_root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1154,6 +1331,7 @@ pub fn rewrite_hub_wiki_page(
         &coordinator,
         project_id,
         &provider,
+        Some(&instance.wiki_id),
         slug,
         &rewrite.after,
     )
@@ -1164,6 +1342,7 @@ pub fn draft_hub_wiki_page(
     app: AppHandle,
     project_id: String,
     provider: String,
+    wiki_id: Option<String>,
     topic: String,
     section: Option<String>,
 ) -> Result<HubWikiPageDraftResponse, HubCommandError> {
@@ -1190,24 +1369,13 @@ pub fn draft_hub_wiki_page(
             false,
         ));
     }
-    let project = list_projects(&app)?
-        .into_iter()
-        .find(|project| project.id == project_id)
-        .ok_or_else(|| {
-            command_error(
-                "project_not_found",
-                "The selected Project is not registered.",
-                false,
-            )
-        })?;
-    let existing_sections = match provider.as_str() {
-        "open_zread" => read_open_zread_wiki(&app, project_id)?.pages,
-        "zread" => read_zread_wiki(&app, project_id)?.pages,
-        _ => unreachable!(),
-    }
-    .into_iter()
-    .map(|page| page.section)
-    .collect::<std::collections::BTreeSet<_>>();
+    let instance = resolve_provider_instance(&app, project_id, &provider, wiki_id.as_deref())?;
+    let existing_sections =
+        read_wiki_instance(&app, project_id, &instance.wiki_id, instance.provider)?
+            .pages
+            .into_iter()
+            .map(|page| page.section)
+            .collect::<std::collections::BTreeSet<_>>();
     let executable = embedded_runner_executable(&app)?;
     let input = serde_json::json!({
         "topic": topic,
@@ -1219,7 +1387,7 @@ pub fn draft_hub_wiki_page(
         .arg("--stdio")
         .arg("--operation")
         .arg("draft")
-        .current_dir(&project.path)
+        .current_dir(&instance.source_root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1266,11 +1434,8 @@ pub fn draft_hub_wiki_page(
         ));
     }
     Ok(HubWikiPageDraftResponse {
-        provider: if provider == "zread" {
-            "zread"
-        } else {
-            "open_zread"
-        },
+        provider: instance.provider,
+        wiki_id: instance.wiki_id,
         slug: draft.slug,
         title: draft.title,
         section: draft.section,
@@ -1299,6 +1464,86 @@ pub fn set_hub_project_favorite(
     favorite: bool,
 ) -> Result<HubProject, HubCommandError> {
     set_project_favorite(&app, &project_id, favorite)
+}
+
+#[tauri::command]
+pub fn rename_hub_project(
+    app: AppHandle,
+    project_id: String,
+    name: String,
+) -> Result<HubProject, HubCommandError> {
+    rename_project(&app, &project_id, &name)
+}
+
+#[tauri::command]
+pub fn list_hub_project_wikis(
+    app: AppHandle,
+    project_id: String,
+) -> Result<HubWikiInstanceList, HubCommandError> {
+    crate::wiki_instances::list_project_wikis(&app, &project_id)
+}
+
+#[tauri::command]
+pub fn locate_hub_project_wikis(
+    app: AppHandle,
+    project_id: String,
+    directory: String,
+) -> Result<HubWikiInstanceList, HubCommandError> {
+    crate::wiki_instances::locate_project_wikis(&app, &project_id, &directory)
+}
+
+#[tauri::command]
+pub fn list_hub_project_markdown(
+    app: AppHandle,
+    project_id: String,
+) -> Result<HubProjectMarkdownTree, HubCommandError> {
+    crate::markdown::scan_project_markdown(&app, &project_id)
+}
+
+#[tauri::command]
+pub fn read_hub_project_markdown(
+    app: AppHandle,
+    project_id: String,
+    relative_path: String,
+) -> Result<HubMarkdownDocument, HubCommandError> {
+    crate::markdown::read_project_markdown(&app, &project_id, &relative_path)
+}
+
+#[tauri::command]
+pub fn save_hub_project_markdown(
+    app: AppHandle,
+    project_id: String,
+    relative_path: String,
+    base_revision: String,
+    content: String,
+) -> Result<HubMarkdownDocument, HubCommandError> {
+    crate::markdown::save_project_markdown(
+        &app,
+        &project_id,
+        &relative_path,
+        &base_revision,
+        &content,
+    )
+}
+
+#[tauri::command]
+pub fn read_hub_project_markdown_asset(
+    app: AppHandle,
+    project_id: String,
+    document_path: String,
+    asset_path: String,
+) -> Result<HubWikiAsset, HubCommandError> {
+    crate::markdown::read_project_markdown_asset(&app, &project_id, &document_path, &asset_path)
+}
+
+#[tauri::command]
+pub fn read_hub_project_markdown_source(
+    app: AppHandle,
+    project_id: String,
+    document_path: String,
+    source_path: String,
+) -> Result<HubSourceFile, HubCommandError> {
+    crate::markdown::read_project_markdown_source(&app, &project_id, &document_path, &source_path)
 }
 
 #[tauri::command]
@@ -1335,54 +1580,92 @@ pub fn open_hub_project_terminal(
 pub fn read_hub_open_zread_wiki(
     app: AppHandle,
     project_id: String,
+    wiki_id: Option<String>,
 ) -> Result<HubOpenZreadWiki, HubCommandError> {
-    read_open_zread_wiki(&app, &project_id)
+    match wiki_id {
+        Some(wiki_id) => read_wiki_instance(&app, &project_id, &wiki_id, "open_zread"),
+        None => read_open_zread_wiki(&app, &project_id),
+    }
 }
 
 #[tauri::command]
 pub fn read_hub_open_zread_source(
     app: AppHandle,
     project_id: String,
+    wiki_id: Option<String>,
     path: String,
 ) -> Result<HubSourceFile, HubCommandError> {
-    read_open_zread_source(&app, &project_id, &path)
+    match wiki_id {
+        Some(wiki_id) => read_source_for_instance(&app, &project_id, &wiki_id, "open_zread", &path),
+        None => read_open_zread_source(&app, &project_id, &path),
+    }
 }
 
 #[tauri::command]
 pub fn read_hub_open_zread_asset(
     app: AppHandle,
     project_id: String,
+    wiki_id: Option<String>,
     page_path: String,
     asset_path: String,
 ) -> Result<HubWikiAsset, HubCommandError> {
-    read_open_zread_asset(&app, &project_id, &page_path, &asset_path)
+    match wiki_id {
+        Some(wiki_id) => read_asset_for_instance(
+            &app,
+            &project_id,
+            &wiki_id,
+            "open_zread",
+            &page_path,
+            &asset_path,
+        ),
+        None => read_open_zread_asset(&app, &project_id, &page_path, &asset_path),
+    }
 }
 
 #[tauri::command]
 pub fn read_hub_zread_wiki(
     app: AppHandle,
     project_id: String,
+    wiki_id: Option<String>,
 ) -> Result<crate::contracts::HubZreadWiki, HubCommandError> {
-    read_zread_wiki(&app, &project_id)
+    match wiki_id {
+        Some(wiki_id) => read_wiki_instance(&app, &project_id, &wiki_id, "zread"),
+        None => read_zread_wiki(&app, &project_id),
+    }
 }
 
 #[tauri::command]
 pub fn read_hub_zread_source(
     app: AppHandle,
     project_id: String,
+    wiki_id: Option<String>,
     path: String,
 ) -> Result<HubSourceFile, HubCommandError> {
-    read_zread_source(&app, &project_id, &path)
+    match wiki_id {
+        Some(wiki_id) => read_source_for_instance(&app, &project_id, &wiki_id, "zread", &path),
+        None => read_zread_source(&app, &project_id, &path),
+    }
 }
 
 #[tauri::command]
 pub fn read_hub_zread_asset(
     app: AppHandle,
     project_id: String,
+    wiki_id: Option<String>,
     page_path: String,
     asset_path: String,
 ) -> Result<HubWikiAsset, HubCommandError> {
-    read_zread_asset(&app, &project_id, &page_path, &asset_path)
+    match wiki_id {
+        Some(wiki_id) => read_asset_for_instance(
+            &app,
+            &project_id,
+            &wiki_id,
+            "zread",
+            &page_path,
+            &asset_path,
+        ),
+        None => read_zread_asset(&app, &project_id, &page_path, &asset_path),
+    }
 }
 
 #[tauri::command]
@@ -1412,6 +1695,33 @@ mod tests {
             write(root.join(resource), b"test resource").expect("test resource should be created");
         }
         root
+    }
+
+    #[test]
+    fn markdown_ask_enforces_document_question_and_selection_limits() {
+        assert!(validate_markdown_ask_sizes(
+            &"q".repeat(MAX_MARKDOWN_ASK_QUESTION_BYTES),
+            Some(&"s".repeat(MAX_MARKDOWN_ASK_SELECTION_BYTES)),
+            &"c".repeat(MAX_MARKDOWN_ASK_CONTEXT_BYTES),
+        )
+        .is_ok());
+
+        let oversized_document = validate_markdown_ask_sizes(
+            "question",
+            None,
+            &"c".repeat(MAX_MARKDOWN_ASK_CONTEXT_BYTES + 1),
+        )
+        .expect_err("oversized document context should be rejected");
+        assert_eq!(oversized_document.code, "context_too_large");
+        assert!(oversized_document.message.contains("64 KiB"));
+
+        let oversized_selection = validate_markdown_ask_sizes(
+            "question",
+            Some(&"s".repeat(MAX_MARKDOWN_ASK_SELECTION_BYTES + 1)),
+            "document",
+        )
+        .expect_err("oversized selected text should be rejected");
+        assert_eq!(oversized_selection.code, "invalid_request");
     }
 
     fn valid_manifest() -> RunnerManifest {

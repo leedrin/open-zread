@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "dialog:allow-open",
+    "opener:allow-default-urls",
     "clipboard-manager:allow-write-text"
   ]
 }

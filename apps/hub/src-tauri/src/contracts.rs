@@ -91,7 +91,86 @@ pub struct HubProject {
     pub wiki: HubProjectWikiSummary,
     pub favorite: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub added_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_opened_at: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiInstance {
+    pub wiki_id: String,
+    pub provider: &'static str,
+    pub source_root: String,
+    pub label: String,
+    pub status: &'static str,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiInstanceList {
+    pub project_id: String,
+    pub instances: Vec<HubWikiInstance>,
+    pub scan_complete: bool,
+    pub scanned_directories: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubMarkdownNode {
+    pub kind: &'static str,
+    pub name: String,
+    pub relative_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub children: Option<Vec<HubMarkdownNode>>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubMarkdownFileError {
+    pub relative_path: String,
+    pub message: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubProjectMarkdownTree {
+    pub project_id: String,
+    pub roots: Vec<HubMarkdownNode>,
+    pub scan_complete: bool,
+    pub scanned_directories: usize,
+    pub scanned_files: usize,
+    pub errors: Vec<HubMarkdownFileError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubMarkdownDocument {
+    pub project_id: String,
+    pub relative_path: String,
+    pub title: String,
+    pub content: String,
+    pub revision: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubMarkdownAnswerResponse {
+    pub project_id: String,
+    pub path: String,
+    pub title: String,
+    pub model: String,
+    pub answer: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -137,6 +216,8 @@ pub struct HubWikiPage {
 #[serde(rename_all = "camelCase")]
 pub struct HubOpenZreadWiki {
     pub provider: &'static str,
+    pub wiki_id: String,
+    pub source_root: String,
     pub status: &'static str,
     pub catalog: HubWikiCatalog,
     pub pages: Vec<HubWikiPage>,
@@ -184,12 +265,20 @@ pub struct HubCommandError {
 pub struct HubTaskProgress {
     pub current: u32,
     pub total: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub succeeded: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed: Option<u32>,
 }
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HubTaskEvent {
     pub task_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wiki_id: Option<String>,
     pub kind: &'static str,
     pub status: &'static str,
     pub phase: String,
@@ -197,7 +286,11 @@ pub struct HubTaskEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<HubTaskProgress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_resume: Option<bool>,
 }
 
 #[derive(Clone, Serialize)]
@@ -207,6 +300,7 @@ pub struct HubTask {
     pub kind: &'static str,
     pub status: &'static str,
     pub project_id: String,
+    pub wiki_id: String,
     pub provider: &'static str,
     pub operation: &'static str,
     pub model: &'static str,
@@ -215,16 +309,40 @@ pub struct HubTask {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HubWikiFileChange {
+    pub relative_path: String,
+    pub action: &'static str,
+    pub before: Option<String>,
+    pub after: Option<String>,
+    pub base_revision: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWikiChangeValidation {
+    pub status: &'static str,
+    pub checks: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HubWikiChangeSet {
     pub change_set_id: String,
     pub project_id: String,
     pub provider: &'static str,
+    pub wiki_id: String,
     pub slug: String,
     pub relative_path: String,
     pub before: String,
     pub after: String,
     pub status: &'static str,
     pub created_at: String,
+    pub operation: &'static str,
+    pub base_revision: String,
+    pub version_pointer: Option<String>,
+    pub files: Vec<HubWikiFileChange>,
+    pub validation: HubWikiChangeValidation,
 }
 
 #[derive(Clone, Serialize)]
@@ -233,6 +351,7 @@ pub struct HubWikiHistoryEntry {
     pub id: String,
     pub project_id: String,
     pub provider: &'static str,
+    pub wiki_id: String,
     pub label: String,
     pub created_at: String,
     pub current: bool,
@@ -245,6 +364,8 @@ pub struct HubWikiSearchResult {
     pub project_id: String,
     pub project_name: String,
     pub provider: &'static str,
+    pub wiki_id: String,
+    pub source_root: String,
     pub slug: String,
     pub title: String,
     pub snippet: String,
@@ -257,6 +378,8 @@ pub struct HubWikiSearchFailure {
     pub project_id: String,
     pub project_name: String,
     pub provider: &'static str,
+    pub wiki_id: String,
+    pub source_root: String,
     pub message: String,
 }
 
@@ -266,6 +389,49 @@ pub struct HubWikiSearchResponse {
     pub query: String,
     pub results: Vec<HubWikiSearchResult>,
     pub failures: Vec<HubWikiSearchFailure>,
+    pub markdown_results: Vec<HubMarkdownSearchResult>,
+    pub markdown_failures: Vec<HubMarkdownSearchFailure>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubMarkdownSearchResult {
+    pub source_kind: &'static str,
+    pub project_id: String,
+    pub project_name: String,
+    pub path: String,
+    pub title: String,
+    pub snippet: String,
+    pub match_kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_column: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_length: Option<usize>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubMarkdownSearchFailure {
+    pub project_id: String,
+    pub project_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relative_path: Option<String>,
+    pub message: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubProjectMarkdownSearchResponse {
+    pub project_id: String,
+    pub query: String,
+    pub results: Vec<HubMarkdownSearchResult>,
+    pub scan_complete: bool,
+    pub scanned_files: usize,
+    pub errors: Vec<HubMarkdownFileError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -273,6 +439,7 @@ pub struct HubWikiSearchResponse {
 pub struct HubWikiPageMutationResponse {
     pub project_id: String,
     pub provider: &'static str,
+    pub wiki_id: String,
     pub slug: String,
     pub action: &'static str,
     pub relative_path: String,
@@ -283,6 +450,7 @@ pub struct HubWikiPageMutationResponse {
 pub struct HubWikiBatchMutationResponse {
     pub project_id: String,
     pub provider: &'static str,
+    pub wiki_id: String,
     pub mutations: Vec<HubWikiPageMutationResponse>,
 }
 
@@ -314,6 +482,7 @@ pub struct HubWikiAnswerReference {
 pub struct HubWikiAnswerResponse {
     pub project_id: String,
     pub provider: &'static str,
+    pub wiki_id: String,
     pub slug: String,
     pub answer: String,
     pub references: Vec<HubWikiAnswerReference>,
@@ -323,6 +492,7 @@ pub struct HubWikiAnswerResponse {
 #[serde(rename_all = "camelCase")]
 pub struct HubWikiPageDraftResponse {
     pub provider: &'static str,
+    pub wiki_id: String,
     pub slug: String,
     pub title: String,
     pub section: String,
@@ -362,16 +532,24 @@ mod tests {
     fn task_event_omits_absent_optional_fields() {
         let event = HubTaskEvent {
             task_id: "task-1".to_string(),
+            project_id: Some("project-1".to_string()),
+            wiki_id: Some("open_zread@docs".to_string()),
             kind: "generation",
             status: "running",
             phase: "planning".to_string(),
             occurred_at: "2026-09-16T00:00:00.000Z".to_string(),
             message: None,
+            details: None,
             progress: None,
+            can_resume: None,
         };
         let value = serde_json::to_value(event).expect("task event should be serializable");
         assert_eq!(value["taskId"], "task-1");
+        assert_eq!(value["projectId"], "project-1");
+        assert_eq!(value["wikiId"], "open_zread@docs");
         assert!(value.get("message").is_none());
+        assert!(value.get("details").is_none());
         assert!(value.get("progress").is_none());
+        assert!(value.get("canResume").is_none());
     }
 }

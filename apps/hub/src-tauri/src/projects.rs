@@ -25,6 +25,8 @@ struct ProjectRecord {
     #[serde(default)]
     favorite: bool,
     #[serde(default)]
+    added_at: Option<String>,
+    #[serde(default)]
     last_opened_at: Option<String>,
 }
 
@@ -154,6 +156,36 @@ fn now_millis() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis().to_string())
         .unwrap_or_else(|_| "0".to_string())
+}
+
+fn new_project_record(name: String, path: String) -> ProjectRecord {
+    let added_at = now_millis();
+    ProjectRecord {
+        id: Uuid::new_v4().to_string(),
+        name,
+        path,
+        previous_paths: Vec::new(),
+        favorite: false,
+        added_at: Some(added_at.clone()),
+        last_opened_at: Some(added_at),
+    }
+}
+
+fn mark_project_opened(record: &mut ProjectRecord) {
+    record.last_opened_at = Some(now_millis());
+}
+
+fn set_project_name(record: &mut ProjectRecord, raw_name: &str) -> Result<(), HubCommandError> {
+    let name = raw_name.trim();
+    if name.is_empty() || name.chars().any(char::is_control) || name.chars().count() > 120 {
+        return Err(command_error(
+            "project_invalid_name",
+            "Project name must contain 1 to 120 non-control characters.",
+            false,
+        ));
+    }
+    record.name = name.to_string();
+    Ok(())
 }
 
 fn normalized_path_text(path: &Path) -> String {
@@ -384,7 +416,7 @@ fn inspect_catalog(catalog_path: &Path, page_root: &Path, flat_pages: bool) -> &
     }
 }
 
-fn inspect_open_zread(path: &Path) -> &'static str {
+pub(crate) fn inspect_open_zread(path: &Path) -> &'static str {
     let wiki_root = path.join(".open-zread").join("wiki");
     match fs::metadata(&wiki_root) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return "missing",
@@ -400,7 +432,7 @@ fn inspect_open_zread(path: &Path) -> &'static str {
     }
 }
 
-fn inspect_zread(path: &Path) -> &'static str {
+pub(crate) fn inspect_zread(path: &Path) -> &'static str {
     let wiki_root = path.join(".zread").join("wiki");
     match fs::metadata(&wiki_root) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return "missing",
@@ -456,6 +488,7 @@ fn project_view(record: &ProjectRecord) -> HubProject {
         availability_reason,
         wiki: HubProjectWikiSummary { open_zread, zread },
         favorite: record.favorite,
+        added_at: record.added_at.clone(),
         last_opened_at: record.last_opened_at.clone(),
     }
 }
@@ -495,6 +528,14 @@ fn append_previous_path(record: &mut ProjectRecord, path: &str) {
     record.previous_paths.push(path.to_string());
 }
 
+fn relocate_record(record: &mut ProjectRecord, path: String, normalized_key: &str) {
+    let old_path = record.path.clone();
+    if normalized_path_key(Path::new(&old_path)) != normalized_key {
+        append_previous_path(record, &old_path);
+        record.path = path;
+    }
+}
+
 pub(crate) fn list_projects(app: &AppHandle) -> Result<Vec<HubProject>, HubCommandError> {
     let registry = load_registry(&registry_path(app)?)?;
     Ok(registry.projects.iter().map(project_view).collect())
@@ -515,7 +556,7 @@ pub(crate) fn register_project(
         .iter_mut()
         .find(|project| normalized_path_key(Path::new(&project.path)) == normalized_key)
     {
-        existing.last_opened_at = Some(now_millis());
+        mark_project_opened(existing);
         let project = project_view(existing);
         save_registry(&storage_path, &registry)?;
         return Ok(RegisterProjectResponse {
@@ -530,14 +571,7 @@ pub(crate) fn register_project(
         .filter(|name| !name.trim().is_empty())
         .unwrap_or("Project")
         .to_string();
-    let record = ProjectRecord {
-        id: Uuid::new_v4().to_string(),
-        name,
-        path: path_string,
-        previous_paths: Vec::new(),
-        favorite: false,
-        last_opened_at: Some(now_millis()),
-    };
+    let record = new_project_record(name, path_string);
     let project = project_view(&record);
     registry.projects.push(record);
     save_registry(&storage_path, &registry)?;
@@ -545,6 +579,20 @@ pub(crate) fn register_project(
         project,
         created: true,
     })
+}
+
+pub(crate) fn rename_project(
+    app: &AppHandle,
+    project_id: &str,
+    raw_name: &str,
+) -> Result<HubProject, HubCommandError> {
+    let storage_path = registry_path(app)?;
+    let mut registry = load_registry(&storage_path)?;
+    let index = project_index(&registry, project_id)?;
+    set_project_name(&mut registry.projects[index], raw_name)?;
+    let project = project_view(&registry.projects[index]);
+    save_registry(&storage_path, &registry)?;
+    Ok(project)
 }
 
 pub(crate) fn set_project_favorite(
@@ -589,11 +637,7 @@ pub(crate) fn relocate_project(
     }
 
     let record = &mut registry.projects[index];
-    let old_path = record.path.clone();
-    if normalized_path_key(Path::new(&old_path)) != normalized_key {
-        append_previous_path(record, &old_path);
-        record.path = path_string;
-    }
+    relocate_record(record, path_string, &normalized_key);
     let project = project_view(record);
     save_registry(&storage_path, &registry)?;
     Ok(project)
@@ -701,6 +745,7 @@ mod tests {
                 path: root.to_string_lossy().into_owned(),
                 previous_paths: Vec::new(),
                 favorite: true,
+                added_at: Some("100".to_string()),
                 last_opened_at: Some("123".to_string()),
             }],
         };
@@ -708,6 +753,86 @@ mod tests {
         let loaded = load_registry(&path).expect("registry should load");
         assert_eq!(loaded.projects[0].id, "stable-id");
         assert!(loaded.projects[0].favorite);
+        remove_dir_all(root).expect("temporary root should be removed");
+    }
+
+    #[test]
+    fn legacy_registry_projects_keep_an_unknown_added_date() {
+        let registry: ProjectRegistry = serde_json::from_str(
+            r#"{"schemaVersion":1,"projects":[{"id":"legacy","name":"Legacy","path":"C:/work/legacy","previousPaths":[],"favorite":false,"lastOpenedAt":"123"}]}"#,
+        )
+        .expect("legacy registry without addedAt should still load");
+        assert_eq!(registry.projects[0].added_at, None);
+        let serialized =
+            serde_json::to_string(&registry).expect("legacy registry should serialize");
+        let reloaded: ProjectRegistry =
+            serde_json::from_str(&serialized).expect("serialized legacy registry should reload");
+        assert_eq!(reloaded.projects[0].added_at, None);
+    }
+
+    #[test]
+    fn added_date_is_preserved_when_reopened_and_relocated() {
+        let root = temporary_root("added-at-stable");
+        let old_path = root.join("old");
+        let new_path = root.join("new");
+        create_dir_all(old_path.join(".open-zread/wiki"))
+            .expect("project Wiki directory should be created");
+        write(old_path.join(".open-zread/wiki/wiki.json"), b"catalog")
+            .expect("Wiki catalog should be written");
+        let mut record = new_project_record("Project".to_string(), normalized_path_text(&old_path));
+        let added_at = record.added_at.clone();
+        assert!(
+            added_at.is_some(),
+            "new project records need an addedAt value"
+        );
+
+        mark_project_opened(&mut record);
+        let new_path_key = normalized_path_key(&new_path);
+        relocate_record(&mut record, normalized_path_text(&new_path), &new_path_key);
+
+        assert_eq!(record.added_at, added_at);
+        assert_eq!(record.path, normalized_path_text(&new_path));
+        assert_eq!(
+            fs::read(old_path.join(".open-zread/wiki/wiki.json"))
+                .expect("renaming the registry location must not move Wiki files"),
+            b"catalog"
+        );
+        remove_dir_all(root).expect("temporary root should be removed");
+    }
+
+    #[test]
+    fn project_rename_validates_name_without_changing_path_or_wiki_files() {
+        let root = temporary_root("rename-project");
+        let catalog = root.join(".open-zread/wiki/wiki.json");
+        create_dir_all(catalog.parent().expect("catalog should have a parent"))
+            .expect("Wiki directory should be created");
+        write(&catalog, b"unchanged").expect("Wiki catalog should be written");
+        let mut record = new_project_record("Before".to_string(), normalized_path_text(&root));
+        let path = record.path.clone();
+        let added_at = record.added_at.clone();
+
+        set_project_name(&mut record, "  After  ").expect("valid project name should be accepted");
+        assert_eq!(record.name, "After");
+        assert_eq!(record.path, path);
+        assert_eq!(record.added_at, added_at);
+        assert_eq!(
+            fs::read(&catalog).expect("catalog should remain readable"),
+            b"unchanged"
+        );
+        assert_eq!(
+            set_project_name(&mut record, "  ").unwrap_err().code,
+            "project_invalid_name"
+        );
+        assert_eq!(
+            set_project_name(&mut record, "bad\nname").unwrap_err().code,
+            "project_invalid_name"
+        );
+        assert_eq!(
+            set_project_name(&mut record, &"x".repeat(121))
+                .unwrap_err()
+                .code,
+            "project_invalid_name"
+        );
         remove_dir_all(root).expect("temporary root should be removed");
     }
 
@@ -730,6 +855,7 @@ mod tests {
             path: root.join("gone").to_string_lossy().into_owned(),
             previous_paths: Vec::new(),
             favorite: false,
+            added_at: None,
             last_opened_at: None,
         };
         let missing_view = project_view(&missing);
@@ -750,6 +876,7 @@ mod tests {
             path: invalid_root.to_string_lossy().into_owned(),
             previous_paths: Vec::new(),
             favorite: false,
+            added_at: None,
             last_opened_at: None,
         };
         let invalid_view = project_view(&invalid);
@@ -775,6 +902,7 @@ mod tests {
             path: root.to_string_lossy().into_owned(),
             previous_paths: Vec::new(),
             favorite: false,
+            added_at: None,
             last_opened_at: None,
         };
         assert_eq!(project_view(&record).wiki.open_zread, "partial");
@@ -799,6 +927,7 @@ mod tests {
             path: root.to_string_lossy().into_owned(),
             previous_paths: Vec::new(),
             favorite: false,
+            added_at: None,
             last_opened_at: None,
         };
         assert_eq!(project_view(&record).wiki.open_zread, "partial");
@@ -816,6 +945,7 @@ mod tests {
             path: current.to_string_lossy().into_owned(),
             previous_paths: Vec::new(),
             favorite: false,
+            added_at: None,
             last_opened_at: None,
         };
 

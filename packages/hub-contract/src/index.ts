@@ -11,10 +11,13 @@ export const HUB_COMMANDS = {
   startOpenZreadTask: 'start_hub_open_zread_task',
   startZreadTask: 'start_hub_zread_task',
   previewWikiChange: 'preview_hub_wiki_change',
+  previewWikiStructureChange: 'preview_hub_wiki_structure_change',
   applyWikiChange: 'apply_hub_wiki_change',
   listWikiHistory: 'list_hub_wiki_history',
   restoreWikiHistory: 'restore_hub_wiki_history',
   searchWiki: 'search_hub_wiki',
+  searchProjectMarkdown: 'search_hub_project_markdown',
+  askProjectMarkdown: 'ask_hub_project_markdown',
   createWikiPage: 'create_hub_wiki_page',
   createWikiPages: 'create_hub_wiki_pages',
   deleteWikiPage: 'delete_hub_wiki_page',
@@ -26,7 +29,15 @@ export const HUB_COMMANDS = {
   cancelTask: 'cancel_hub_task',
   listProjects: 'list_hub_projects',
   registerProject: 'register_hub_project',
+  renameProject: 'rename_hub_project',
   setProjectFavorite: 'set_hub_project_favorite',
+  listProjectWikis: 'list_hub_project_wikis',
+  locateProjectWikis: 'locate_hub_project_wikis',
+  listProjectMarkdown: 'list_hub_project_markdown',
+  readProjectMarkdown: 'read_hub_project_markdown',
+  saveProjectMarkdown: 'save_hub_project_markdown',
+  readProjectMarkdownAsset: 'read_hub_project_markdown_asset',
+  readProjectMarkdownSource: 'read_hub_project_markdown_source',
   relocateProject: 'relocate_hub_project',
   removeProject: 'remove_hub_project',
   openProjectFolder: 'open_hub_project_folder',
@@ -124,7 +135,69 @@ export interface HubProject {
   availabilityReason?: string;
   wiki: HubProjectWikiSummary;
   favorite: boolean;
+  addedAt?: string;
   lastOpenedAt?: string;
+}
+
+export type HubWikiInstanceStatus = 'readable' | 'partial' | 'invalid';
+
+export interface HubWikiInstance {
+  wikiId: string;
+  provider: HubWikiProvider;
+  sourceRoot: string;
+  label: string;
+  status: HubWikiInstanceStatus;
+}
+
+export interface HubWikiInstanceList {
+  projectId: string;
+  instances: HubWikiInstance[];
+  scanComplete: boolean;
+  scannedDirectories: number;
+  warning?: string;
+}
+
+export type HubMarkdownNodeKind = 'directory' | 'file';
+
+export interface HubMarkdownNode {
+  kind: HubMarkdownNodeKind;
+  name: string;
+  relativePath: string;
+  title?: string;
+  bytes?: number;
+  modifiedAt?: string;
+  children?: HubMarkdownNode[];
+}
+
+export interface HubMarkdownFileError {
+  relativePath: string;
+  message: string;
+}
+
+export interface HubProjectMarkdownTree {
+  projectId: string;
+  roots: HubMarkdownNode[];
+  scanComplete: boolean;
+  scannedDirectories: number;
+  scannedFiles: number;
+  errors: HubMarkdownFileError[];
+  warning?: string;
+}
+
+export interface HubMarkdownDocument {
+  projectId: string;
+  relativePath: string;
+  title: string;
+  content: string;
+  revision: string;
+}
+
+export interface HubMarkdownAnswerResponse {
+  projectId: string;
+  path: string;
+  title: string;
+  model: string;
+  answer: string;
 }
 
 export interface RegisterProjectResponse {
@@ -159,6 +232,8 @@ export type HubWikiProvider = 'open_zread' | 'zread';
 
 export interface HubWikiDocument {
   provider: HubWikiProvider;
+  wikiId: string;
+  sourceRoot: string;
   status: Extract<HubWikiStatus, 'readable' | 'partial'>;
   catalog: HubWikiCatalog;
   pages: HubWikiPage[];
@@ -193,16 +268,22 @@ export type HubTaskStatus =
 export interface HubTaskProgress {
   current: number;
   total: number;
+  succeeded?: number;
+  failed?: number;
 }
 
 export interface HubTaskEvent {
   taskId: string;
+  projectId?: string;
+  wikiId?: string;
   kind: HubTaskKind;
   status: HubTaskStatus;
   phase: string;
   occurredAt: string;
   message?: string;
+  details?: string;
   progress?: HubTaskProgress;
+  canResume?: boolean;
 }
 
 export type HubTaskOperation = 'generate' | 'sync';
@@ -213,6 +294,7 @@ export interface HubTask {
   kind: Extract<HubTaskKind, 'generation' | 'update'>;
   status: Extract<HubTaskStatus, 'queued' | 'running'>;
   projectId: string;
+  wikiId: string;
   provider: 'open_zread' | 'zread';
   operation: HubTaskOperation;
   model: string;
@@ -221,22 +303,69 @@ export interface HubTask {
 
 export type HubChangeSetStatus = 'preview' | 'applied' | 'rejected';
 
+export type HubWikiFileChangeAction = 'create' | 'update' | 'delete';
+
+export interface HubWikiFileChange {
+  relativePath: string;
+  action: HubWikiFileChangeAction;
+  before: string | null;
+  after: string | null;
+  baseRevision: string;
+}
+
+export interface HubWikiChangeValidation {
+  status: 'passed' | 'failed';
+  checks: string[];
+  warnings: string[];
+}
+
+export interface HubWikiStructurePageInput {
+  slug: string;
+  title: string;
+  section: string;
+  group?: string;
+  content: string;
+  associatedFiles: string[];
+}
+
+export type HubWikiStructureChangeRequest =
+  | { operation: 'create'; pages: HubWikiStructurePageInput[] }
+  | { operation: 'delete'; slug: string }
+  | {
+    operation: 'metadata';
+    slug: string;
+    newSlug?: string;
+    title?: string;
+    section?: string;
+    group?: string;
+    associatedFiles?: string[];
+    order?: number;
+    clearGroup?: boolean;
+  };
+
 export interface HubWikiChangeSet {
   changeSetId: string;
   projectId: string;
   provider: HubWikiProvider;
+  wikiId?: string;
   slug: string;
   relativePath: string;
   before: string;
   after: string;
   status: HubChangeSetStatus;
   createdAt: string;
+  operation?: 'edit' | 'create' | 'batch_create' | 'delete' | 'metadata';
+  baseRevision?: string;
+  versionPointer?: string | null;
+  files?: HubWikiFileChange[];
+  validation?: HubWikiChangeValidation;
 }
 
 export interface HubWikiHistoryEntry {
   id: string;
   projectId: string;
   provider: HubWikiProvider;
+  wikiId?: string;
   label: string;
   createdAt: string;
   current: boolean;
@@ -247,16 +376,50 @@ export interface HubWikiSearchResult {
   projectId: string;
   projectName: string;
   provider: HubWikiProvider;
+  wikiId: string;
+  sourceRoot: string;
   slug: string;
   title: string;
   snippet: string;
   path: string;
 }
 
+export interface HubMarkdownSearchResult {
+  sourceKind: 'local_markdown';
+  projectId: string;
+  projectName: string;
+  path: string;
+  title: string;
+  snippet: string;
+  matchKind: 'path' | 'content';
+  matchLine?: number;
+  matchColumn?: number;
+  matchLength?: number;
+}
+
+export interface HubMarkdownSearchFailure {
+  projectId: string;
+  projectName: string;
+  relativePath?: string;
+  message: string;
+}
+
+export interface HubProjectMarkdownSearchResponse {
+  projectId: string;
+  query: string;
+  results: HubMarkdownSearchResult[];
+  scanComplete: boolean;
+  scannedFiles: number;
+  errors: HubMarkdownFileError[];
+  warning?: string;
+}
+
 export interface HubWikiSearchResponse {
   query: string;
   results: HubWikiSearchResult[];
-  failures: Array<{ projectId: string; projectName: string; provider: HubWikiProvider; message: string }>;
+  failures: Array<{ projectId: string; projectName: string; provider: HubWikiProvider; wikiId: string; sourceRoot: string; message: string }>;
+  markdownResults: HubMarkdownSearchResult[];
+  markdownFailures: HubMarkdownSearchFailure[];
 }
 
 export type HubWikiPageMutationAction = 'created' | 'deleted' | 'updated';
@@ -264,6 +427,7 @@ export type HubWikiPageMutationAction = 'created' | 'deleted' | 'updated';
 export interface HubWikiPageMutationResponse {
   projectId: string;
   provider: HubWikiProvider;
+  wikiId?: string;
   slug: string;
   action: HubWikiPageMutationAction;
   relativePath: string;
@@ -272,6 +436,7 @@ export interface HubWikiPageMutationResponse {
 export interface HubWikiBatchMutationResponse {
   projectId: string;
   provider: HubWikiProvider;
+  wikiId?: string;
   mutations: HubWikiPageMutationResponse[];
 }
 
@@ -297,6 +462,7 @@ export interface HubWikiAnswerReference {
 export interface HubWikiAnswerResponse {
   projectId: string;
   provider: HubWikiProvider;
+  wikiId?: string;
   slug: string;
   answer: string;
   references: HubWikiAnswerReference[];
@@ -304,6 +470,7 @@ export interface HubWikiAnswerResponse {
 
 export interface HubWikiPageDraftResponse {
   provider: HubWikiProvider;
+  wikiId?: string;
   slug: string;
   title: string;
   section: string;
@@ -330,6 +497,7 @@ export interface CancelTaskResponse {
 
 export type HubCommandErrorCode =
   | 'invalid_request'
+  | 'project_invalid_name'
   | 'task_not_found'
   | 'project_invalid_path'
   | 'project_not_found'
@@ -339,6 +507,8 @@ export type HubCommandErrorCode =
   | 'project_registry_corrupt'
   | 'wiki_not_found'
   | 'wiki_invalid'
+  | 'wiki_scan_failed'
+  | 'markdown_scan_failed'
   | 'wiki_read_failed'
   | 'source_not_found'
   | 'source_invalid_path'

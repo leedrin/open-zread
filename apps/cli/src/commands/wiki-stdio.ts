@@ -3,6 +3,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   createOpenZreadApplication,
+  type OpenZreadApplicationDependencies,
   type ArticleEventPayload,
   type CatalogEvent,
 } from '@open-zread/orchestrator';
@@ -11,8 +12,16 @@ import {
   getWikiDir,
   loadConfig,
   loadWikiBlueprint,
+  logger,
 } from '@open-zread/utils';
 import type { WikiPage } from '@open-zread/types';
+import {
+  fingerprintGenerationPlan,
+  hydrateGenerationCheckpoint,
+  removeGenerationCheckpoint,
+  saveGenerationCheckpoint,
+  type GenerationCheckpoint,
+} from './wiki-generation-checkpoint';
 
 export type OpenZreadStdioOperation = 'generate' | 'sync' | 'ask' | 'rewrite' | 'draft';
 
@@ -43,12 +52,17 @@ export interface OpenZreadStdioEvent {
   status: 'running' | 'succeeded' | 'failed';
   phase: string;
   message?: string;
-  progress?: { current: number; total: number };
+  details?: string;
+  progress?: { current: number; total: number; succeeded: number; failed: number };
+  canResume?: boolean;
 }
 
 export interface OpenZreadStdioRunOptions {
   projectRoot: string;
-  operation: OpenZreadStdioOperation;
+  operation: 'generate' | 'sync';
+  resume?: boolean;
+  applicationDependencies?: OpenZreadApplicationDependencies;
+  generationSettings?: { concurrency: number; modelIdentity: string };
   emit?: (event: OpenZreadStdioEvent) => void;
 }
 
@@ -130,33 +144,38 @@ function forwardCatalogEvent(
 function forwardArticleEvent(
   emit: ((event: OpenZreadStdioEvent) => void) | undefined,
   event: ArticleEventPayload,
-  progress: { current: number; total: number },
+  progress: { current: number; total: number; succeeded: number; failed: number },
 ): void {
   const terminal = event.type === 'page_complete' || event.type === 'page_error';
   if (terminal) {
     progress.current += 1;
+    if (event.type === 'page_complete') progress.succeeded += 1;
+    else progress.failed += 1;
   }
   emitEvent(emit, {
     status: 'running',
     phase: `page-${event.type}`,
-    message: event.slug,
+    message: event.error ? `${event.slug}: ${event.error}` : event.slug,
     ...(terminal ? { progress: { ...progress } } : {}),
   });
 }
 
-async function readConfiguredConcurrency(): Promise<number> {
+async function readConfiguredGenerationSettings(): Promise<{ concurrency: number; modelIdentity: string }> {
   const config = await loadConfig();
   if (!config.llm.provider || !config.llm.model || !config.llm.api_key) {
     throw new Error('OpenZread model configuration is incomplete; configure the Hub shared model first.');
   }
-  return Number.isInteger(config.concurrency.max_concurrent) && config.concurrency.max_concurrent > 0
-    ? config.concurrency.max_concurrent
-    : 1;
+  return {
+    concurrency: Number.isInteger(config.concurrency.max_concurrent) && config.concurrency.max_concurrent > 0
+      ? config.concurrency.max_concurrent
+      : 1,
+    modelIdentity: `${config.llm.provider}/${config.llm.model}`,
+  };
 }
 
 function askSystemPrompt(input: OpenZreadAskInput): string {
   return [
-    'You are a documentation reading assistant for a local Wiki.',
+    'You are a documentation reading assistant for the supplied local project document.',
     'Answer primarily from the supplied page context and selected text.',
     'If the context is insufficient, say what is missing instead of guessing.',
     'Do not claim access to files or runtime state beyond the supplied context.',
@@ -195,6 +214,7 @@ async function runAskStdio(input: OpenZreadAskInput): Promise<void> {
     kind: 'qa',
     status: 'succeeded',
     answer: answer || 'The model returned no displayable text.',
+    model: `${config.llm.provider}/${config.llm.model}`,
     references: input.pageSlug ? [{ slug: input.pageSlug, title: input.pageTitle ?? 'Untitled' }] : [],
   })}\n`);
 }
@@ -299,10 +319,16 @@ export async function runOpenZreadStdio(options: OpenZreadStdioRunOptions): Prom
   const projectRoot = resolve(options.projectRoot);
   const emit = options.emit;
   const backup = await backupWiki(projectRoot);
-  const application = createOpenZreadApplication(projectRoot);
+  const application = createOpenZreadApplication(projectRoot, options.applicationDependencies);
+  let plannedPages: WikiPage[] = [];
+  let planFingerprint: string | undefined;
+  let completedSlugs: string[] = [];
+  let progress: { current: number; total: number; succeeded: number; failed: number } | undefined;
+  let failureDetails: string | undefined;
 
   try {
-    const concurrency = await readConfiguredConcurrency();
+    if (!options.resume) await removeGenerationCheckpoint(projectRoot);
+    const generationSettings = options.generationSettings ?? await readConfiguredGenerationSettings();
     emitEvent(emit, {
       status: 'running',
       phase: options.operation === 'sync' ? 'detecting-changes' : 'starting',
@@ -327,32 +353,99 @@ export async function runOpenZreadStdio(options: OpenZreadStdioRunOptions): Prom
       });
     }
 
-    const progress = { current: 0, total: pages.length };
-    if (pages.length > 0) {
+    plannedPages = pages;
+    planFingerprint = await fingerprintGenerationPlan(
+      projectRoot,
+      options.operation,
+      plannedPages,
+      generationSettings.modelIdentity,
+    );
+    const wikiRoot = resolve(getWikiDir(projectRoot));
+    if (options.resume) {
+      const checkpoint = await hydrateGenerationCheckpoint(
+        projectRoot,
+        wikiRoot,
+        plannedPages,
+        options.operation,
+        planFingerprint,
+      );
+      if (!checkpoint) {
+        throw new Error('No saved generation progress is available to continue. Choose “Start over” to generate a fresh Wiki.');
+      }
+      completedSlugs = [...checkpoint.completedSlugs];
+    }
+    const completed = new Set(completedSlugs);
+    const pagesToGenerate = pages.filter((page) => !completed.has(page.slug));
+    progress = { current: completed.size, total: pages.length, succeeded: completed.size, failed: 0 };
+    const pageProgress = progress;
+    if (pagesToGenerate.length > 0) {
       const result = await application.generateWikiContent({
-        pages,
-        maxConcurrent: concurrency,
-        onEvent: (event) => forwardArticleEvent(emit, event, progress),
+        pages: pagesToGenerate,
+        maxConcurrent: generationSettings.concurrency,
+        onEvent: (event) => forwardArticleEvent(emit, event, pageProgress),
       });
+      completedSlugs = [...new Set([
+        ...completedSlugs,
+        ...result.results.filter((page) => page.success).map((page) => page.slug),
+      ])];
+      progress.succeeded = completedSlugs.length;
+      progress.failed = result.failed;
+      progress.current = Math.min(progress.total, progress.succeeded + progress.failed);
       if (result.failed > 0 || result.completed !== result.total) {
-        throw new Error(`Wiki content generation was incomplete: ${result.completed}/${result.total} pages succeeded.`);
+        const failures = result.results
+          .filter((page) => !page.success)
+          .map((page) => `${page.slug}: ${page.error || 'Unknown page generation error'}`);
+        failureDetails = failures.join('\n') || undefined;
+        throw new Error(`Wiki content generation was incomplete: ${progress.succeeded}/${progress.total} pages succeeded; ${progress.failed} failed.`);
       }
     }
 
     const validatedPages = await validateWikiOutput(projectRoot);
+    try {
+      await removeGenerationCheckpoint(projectRoot);
+    } catch (cleanupError) {
+      logger.warn(`Unable to remove the completed Wiki generation checkpoint: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+    }
     emitEvent(emit, {
       status: 'succeeded',
       phase: 'validated',
       message: `${validatedPages.length} page(s) validated`,
-      progress: { current: validatedPages.length, total: validatedPages.length },
+      progress: {
+        current: validatedPages.length,
+        total: validatedPages.length,
+        succeeded: validatedPages.length,
+        failed: 0,
+      },
+      canResume: false,
     });
   } catch (error) {
+    let canResume = false;
+    if (planFingerprint && plannedPages.length > 0 && completedSlugs.length > 0) {
+      try {
+        const checkpoint: GenerationCheckpoint = {
+          version: 1,
+          operation: options.operation,
+          planFingerprint,
+          completedSlugs,
+          savedAt: new Date().toISOString(),
+        };
+        await saveGenerationCheckpoint(projectRoot, resolve(getWikiDir(projectRoot)), plannedPages, checkpoint);
+        canResume = true;
+      } catch (checkpointError) {
+        logger.error(`Unable to save Wiki generation progress: ${checkpointError instanceof Error ? checkpointError.message : String(checkpointError)}`);
+      }
+    }
     await restoreWiki(backup);
     const message = error instanceof Error ? error.message : String(error);
     emitEvent(emit, {
       status: 'failed',
       phase: 'failed',
       message,
+      ...(failureDetails || (error instanceof Error && error.stack !== error.message)
+        ? { details: failureDetails ?? (error as Error).stack }
+        : {}),
+      ...(progress ? { progress: { ...progress } } : {}),
+      canResume,
     });
     throw error;
   } finally {
@@ -363,6 +456,7 @@ export async function runOpenZreadStdio(options: OpenZreadStdioRunOptions): Prom
 export async function runOpenZreadStdioCommand(
   projectRoot: string,
   operation: OpenZreadStdioOperation,
+  resume = false,
 ): Promise<void> {
   if (operation === 'ask' || operation === 'rewrite' || operation === 'draft') {
     const input = await new Promise<string>((resolveInput, reject) => {
@@ -383,6 +477,7 @@ export async function runOpenZreadStdioCommand(
   await runOpenZreadStdio({
     projectRoot,
     operation,
+    resume,
     emit: (event) => process.stdout.write(`${JSON.stringify(event)}\n`),
   });
 }

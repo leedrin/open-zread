@@ -117,6 +117,9 @@ describe('Hub React to application-service tracer bullet', () => {
     });
 
     expect(commands).toEqual(['get_hub_health', 'list_hub_projects']);
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'nav-providers' }).props.onClick();
+    });
     expect(renderer?.root.findByProps({ 'data-testid': 'service-status' }).children).toEqual(['healthy']);
     expect(renderer?.root.findByProps({ 'data-testid': 'app-version' }).children).toEqual(['0.1.0-test']);
     expect(renderer?.root.findByProps({ 'data-testid': 'runner-status' }).children).toEqual(['available']);
@@ -127,6 +130,9 @@ describe('Hub React to application-service tracer bullet', () => {
     expect(renderer?.root.findByProps({ 'data-testid': 'provider-health-zread' })).toBeDefined();
     expect(renderer?.root.findByProps({ 'data-testid': 'provider-zread-generator-status' }).children).toEqual(['available']);
     expect(renderer?.root.findByProps({ 'data-testid': 'provider-zread-sync' }).children).toEqual(['Unsupported']);
+    await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'nav-home' }).props.onClick();
+    });
 
     const taskEvent: HubTaskEvent = {
       taskId: 'task-1',
@@ -288,12 +294,15 @@ describe('Hub React to application-service tracer bullet', () => {
     expect(renderer?.root.findByProps({ 'data-testid': 'project-project-1' })).toBeDefined();
 
     await act(async () => {
+      renderer?.root.findByProps({ 'data-testid': 'nav-projects' }).props.onClick();
+    });
+    await act(async () => {
       renderer?.root.findByProps({ 'data-testid': 'add-project' }).props.onClick();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(selected).toBe(true);
     expect(renderer?.root.findByProps({ role: 'status' }).children).toEqual([
-      'Project is already in your library.',
+      '该项目已在项目库中。',
     ]);
     await act(async () => {
       renderer?.unmount();

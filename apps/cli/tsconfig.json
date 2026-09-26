@@ -12,6 +12,7 @@
     "types": ["node", "bun-types"],
     "jsx": "react-jsx",
     "paths": {
+      "react": ["./node_modules/@types/react"],
       "@open-zread/types": ["../../packages/types/src/index.ts"],
       "@open-zread/utils": ["../../packages/utils/src/index.ts"],
       "@open-zread/repo-analyzer": ["../../packages/repo-analyzer/src/index.ts"],

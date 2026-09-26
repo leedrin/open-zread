@@ -26,13 +26,14 @@ program
   .description(t.cli.wikiDesc)
   .option('--stdio', 'Run a machine-readable Hub task')
   .option('--operation <operation>', 'Hub operation: generate, sync, ask, rewrite, or draft', 'generate')
-  .action(async (options: { stdio?: boolean; operation?: string }) => {
+  .option('--resume', 'Continue an existing incomplete Wiki generation')
+  .action(async (options: { stdio?: boolean; operation?: string; resume?: boolean }) => {
     if (options.stdio) {
       const operation = options.operation;
       if (operation !== 'generate' && operation !== 'sync' && operation !== 'ask' && operation !== 'rewrite' && operation !== 'draft') {
         throw new Error(`Unsupported stdio wiki operation: ${operation}`);
       }
-      await runOpenZreadStdioCommand(process.cwd(), operation as OpenZreadStdioOperation);
+      await runOpenZreadStdioCommand(process.cwd(), operation as OpenZreadStdioOperation, options.resume);
       return;
     }
     await runWiki();

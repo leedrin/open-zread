@@ -2,6 +2,7 @@ use crate::contracts::{
     HubCommandError, HubOpenZreadWiki, HubSourceFile, HubWikiAsset, HubWikiCatalog, HubWikiPage,
 };
 use crate::projects::{project_root, safe_page_path, safe_relative_path};
+use crate::wiki_instances::resolve_wiki_instance;
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -136,7 +137,7 @@ fn read_page(index: usize, raw: Value, wiki_root: &Path) -> HubWikiPage {
     }
 }
 
-fn read_open_zread_wiki_from_root(
+pub(crate) fn read_open_zread_wiki_from_root(
     project_root: &Path,
 ) -> Result<HubOpenZreadWiki, HubCommandError> {
     let wiki_root = wiki_root(project_root);
@@ -199,6 +200,8 @@ fn read_open_zread_wiki_from_root(
 
     Ok(HubOpenZreadWiki {
         provider: "open_zread",
+        wiki_id: "open_zread@.".to_string(),
+        source_root: ".".to_string(),
         status,
         catalog: HubWikiCatalog {
             id: object_string(catalog_object, "id"),
@@ -332,6 +335,8 @@ fn read_zread_wiki_from_root(
     });
     Ok(crate::contracts::HubZreadWiki {
         provider: "zread",
+        wiki_id: "zread@.".to_string(),
+        source_root: ".".to_string(),
         status,
         catalog: HubWikiCatalog {
             id: object_string(catalog_object, "id"),
@@ -361,11 +366,50 @@ pub(crate) fn read_open_zread_wiki(
     read_open_zread_wiki_from_root(&project_root)
 }
 
+pub(crate) fn read_wiki_instance(
+    app: &tauri::AppHandle,
+    project_id: &str,
+    wiki_id: &str,
+    expected_provider: &str,
+) -> Result<HubOpenZreadWiki, HubCommandError> {
+    let instance = resolve_wiki_instance(app, project_id, wiki_id)?;
+    if instance.provider != expected_provider {
+        return Err(reader_error(
+            "wiki_invalid",
+            "The selected Wiki provider does not match this instance.",
+            false,
+        ));
+    }
+    let mut wiki = match instance.provider {
+        "open_zread" => read_open_zread_wiki_from_root(&instance.source_root)?,
+        "zread" => read_zread_wiki_from_root(&instance.source_root)?,
+        _ => {
+            return Err(reader_error(
+                "wiki_invalid",
+                "The selected Wiki provider is unsupported.",
+                false,
+            ))
+        }
+    };
+    wiki.wiki_id = instance.wiki_id;
+    wiki.source_root = instance
+        .source_root
+        .strip_prefix(&instance.project_root)
+        .unwrap_or(Path::new("."))
+        .to_string_lossy()
+        .replace('\\', "/");
+    Ok(wiki)
+}
+
 pub(crate) fn read_open_zread_source(
     app: &tauri::AppHandle,
     project_id: &str,
     raw_path: &str,
 ) -> Result<HubSourceFile, HubCommandError> {
+    read_source_from_root(&project_root(app, project_id)?, raw_path)
+}
+
+fn read_source_from_root(root: &Path, raw_path: &str) -> Result<HubSourceFile, HubCommandError> {
     let path = raw_path.trim();
     if !safe_relative_path(path) {
         return Err(reader_error(
@@ -374,15 +418,14 @@ pub(crate) fn read_open_zread_source(
             false,
         ));
     }
-    let root = project_root(app, project_id)?;
-    let candidate = safe_page_path(&root, &[path]).ok_or_else(|| {
+    let candidate = safe_page_path(root, &[path]).ok_or_else(|| {
         reader_error(
             "source_invalid_path",
             "Source references must stay inside the registered Project.",
             false,
         )
     })?;
-    let canonical_root = fs::canonicalize(&root).map_err(|_| {
+    let canonical_root = fs::canonicalize(root).map_err(|_| {
         reader_error(
             "source_invalid_path",
             "The registered Project could not be resolved.",
@@ -421,6 +464,32 @@ pub(crate) fn read_open_zread_source(
     })
 }
 
+pub(crate) fn read_source_for_instance(
+    app: &tauri::AppHandle,
+    project_id: &str,
+    wiki_id: &str,
+    expected_provider: &'static str,
+    raw_path: &str,
+) -> Result<HubSourceFile, HubCommandError> {
+    let instance = resolve_wiki_instance(app, project_id, wiki_id)?;
+    ensure_instance_provider(instance.provider, expected_provider)?;
+    read_source_from_root(&instance.source_root, raw_path)
+}
+
+fn ensure_instance_provider(
+    actual_provider: &str,
+    expected_provider: &str,
+) -> Result<(), HubCommandError> {
+    if actual_provider == expected_provider {
+        return Ok(());
+    }
+    Err(reader_error(
+        "wiki_provider_mismatch",
+        "The selected Wiki instance belongs to a different Provider. Rescan and select it again.",
+        false,
+    ))
+}
+
 pub(crate) fn read_zread_source(
     app: &tauri::AppHandle,
     project_id: &str,
@@ -429,7 +498,7 @@ pub(crate) fn read_zread_source(
     read_open_zread_source(app, project_id, raw_path)
 }
 
-fn mime_type(path: &Path) -> &'static str {
+pub(crate) fn mime_type(path: &Path) -> &'static str {
     match path
         .extension()
         .and_then(|extension| extension.to_str())
@@ -454,6 +523,18 @@ pub(crate) fn read_open_zread_asset(
     page_path_text: &str,
     asset_path_text: &str,
 ) -> Result<HubWikiAsset, HubCommandError> {
+    read_open_zread_asset_from_root(
+        &project_root(app, project_id)?,
+        page_path_text,
+        asset_path_text,
+    )
+}
+
+fn read_open_zread_asset_from_root(
+    root: &Path,
+    page_path_text: &str,
+    asset_path_text: &str,
+) -> Result<HubWikiAsset, HubCommandError> {
     let page_path_text = page_path_text.trim();
     let asset_path_text = asset_path_text.trim();
     if !safe_relative_path(page_path_text) || !safe_relative_path(asset_path_text) {
@@ -463,8 +544,7 @@ pub(crate) fn read_open_zread_asset(
             false,
         ));
     }
-    let root = project_root(app, project_id)?;
-    let wiki_root = wiki_root(&root);
+    let wiki_root = wiki_root(root);
     let requested_page = Path::new(page_path_text);
     let requested_file = requested_page
         .file_name()
@@ -520,9 +600,46 @@ pub(crate) fn read_open_zread_asset(
     })
 }
 
+pub(crate) fn read_asset_for_instance(
+    app: &tauri::AppHandle,
+    project_id: &str,
+    wiki_id: &str,
+    expected_provider: &'static str,
+    page_path_text: &str,
+    asset_path_text: &str,
+) -> Result<HubWikiAsset, HubCommandError> {
+    let instance = resolve_wiki_instance(app, project_id, wiki_id)?;
+    ensure_instance_provider(instance.provider, expected_provider)?;
+    match expected_provider {
+        "open_zread" => {
+            read_open_zread_asset_from_root(&instance.source_root, page_path_text, asset_path_text)
+        }
+        "zread" => {
+            read_zread_asset_from_root(&instance.source_root, page_path_text, asset_path_text)
+        }
+        _ => Err(reader_error(
+            "asset_invalid_path",
+            "The selected Wiki provider is unsupported.",
+            false,
+        )),
+    }
+}
+
 pub(crate) fn read_zread_asset(
     app: &tauri::AppHandle,
     project_id: &str,
+    page_path_text: &str,
+    asset_path_text: &str,
+) -> Result<HubWikiAsset, HubCommandError> {
+    read_zread_asset_from_root(
+        &project_root(app, project_id)?,
+        page_path_text,
+        asset_path_text,
+    )
+}
+
+fn read_zread_asset_from_root(
+    root: &Path,
     page_path_text: &str,
     asset_path_text: &str,
 ) -> Result<HubWikiAsset, HubCommandError> {
@@ -535,8 +652,7 @@ pub(crate) fn read_zread_asset(
             false,
         ));
     }
-    let root = project_root(app, project_id)?;
-    let (wiki_root, _) = read_zread_version_root(&root)?;
+    let (wiki_root, _) = read_zread_version_root(root)?;
     let requested_page = Path::new(page_path_text);
     let requested_file = requested_page
         .file_name()
@@ -606,6 +722,35 @@ mod tests {
         let root = std::env::temp_dir().join(format!("open-zread-reader-{label}-{suffix}"));
         create_dir_all(&root).expect("temporary root should be created");
         root
+    }
+
+    #[test]
+    fn instance_resources_reject_a_provider_mismatch() {
+        assert!(ensure_instance_provider("open_zread", "open_zread").is_ok());
+        let error = ensure_instance_provider("zread", "open_zread")
+            .expect_err("an instance from another Provider must be rejected");
+        assert_eq!(error.code, "wiki_provider_mismatch");
+        assert!(!error.retryable);
+    }
+
+    #[test]
+    fn source_and_asset_paths_cannot_escape_their_instance_roots() {
+        let root = temporary_root("instance-resource-boundary");
+        let page = root.join(".open-zread/wiki/docs/page.md");
+        create_dir_all(page.parent().expect("page parent should exist"))
+            .expect("Wiki page directory should be created");
+        write(&page, b"# Page").expect("Wiki page should be written");
+        write(root.join("outside.txt"), b"outside").expect("outside file should be written");
+
+        assert!(matches!(
+            read_source_from_root(&root, "../outside.txt"),
+            Err(error) if error.code == "source_invalid_path"
+        ));
+        assert!(matches!(
+            read_open_zread_asset_from_root(&root, "docs/page.md", "../../../../outside.txt"),
+            Err(error) if error.code == "asset_invalid_path"
+        ));
+        remove_dir_all(root).expect("temporary root should be removed");
     }
 
     #[test]
